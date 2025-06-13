@@ -37,6 +37,7 @@ import {
   Square,
   Circle,
   RotateCw,
+  Download,
 } from "lucide-react";
 import { Button } from "./ui/button";
 
@@ -79,6 +80,20 @@ function Viewer({ files }: ViewerProps) {
   const metadataMapRef = useRef<Map<string, any>>(new Map());
   const VIEWPORT_SCALE = 0.9;
 
+  // Define all tools for consistent management
+  const TOOLS = [
+    ZoomTool,
+    WindowLevelTool,
+    PanTool,
+    LengthTool,
+    ArrowAnnotateTool,
+    AngleTool,
+    CircleROITool,
+    EllipticalROITool,
+    RectangleROITool,
+    PlanarRotateTool,
+  ];
+
   // Initialize Cornerstone
   useEffect(() => {
     const initializeCore = async () => {
@@ -106,19 +121,7 @@ function Viewer({ files }: ViewerProps) {
 
   // Register tools
   useEffect(() => {
-    const tools = [
-      ZoomTool,
-      WindowLevelTool,
-      PanTool,
-      LengthTool,
-      ArrowAnnotateTool,
-      AngleTool,
-      CircleROITool,
-      EllipticalROITool,
-      RectangleROITool,
-      PlanarRotateTool,
-    ];
-    tools.forEach(addTool);
+    TOOLS.forEach(addTool);
     console.log("Tools registered.");
   }, []);
 
@@ -189,7 +192,6 @@ function Viewer({ files }: ViewerProps) {
           const blobUrl = URL.createObjectURL(file);
           const imageId = `wadouri:${blobUrl}`;
 
-          // Store minimal metadata
           metadataMapRef.current.set(imageId, {
             transferSyntax: { TransferSyntaxUID: transferSyntax },
             instanceNumber: dataset.intString("x00200013") || 0,
@@ -218,7 +220,6 @@ function Viewer({ files }: ViewerProps) {
             institutionName: dataset.string("x00080080") || "Unknown",
           });
 
-          // Group by series
           if (!seriesMap.has(seriesInstanceUID)) {
             seriesMap.set(seriesInstanceUID, {
               seriesInstanceUID,
@@ -230,7 +231,6 @@ function Viewer({ files }: ViewerProps) {
           const series = seriesMap.get(seriesInstanceUID)!;
           series.imageIds.push(imageId);
 
-          // Generate thumbnail for first image
           if (series.imageIds.length === 1) {
             await generateThumbnail(imageId, series);
           }
@@ -248,7 +248,6 @@ function Viewer({ files }: ViewerProps) {
         }
       }
 
-      // Metadata provider
       metaData.addProvider((type, id) => {
         const data = metadataMapRef.current.get(id);
         if (data) {
@@ -266,6 +265,7 @@ function Viewer({ files }: ViewerProps) {
       setSeriesList(sortedSeries);
       if (sortedSeries.length > 0 && !selectedSeriesUID) {
         setSelectedSeriesUID(sortedSeries[0].seriesInstanceUID);
+        setCurrentIndex(0);
       }
       setError(
         errors.length > 0
@@ -275,7 +275,6 @@ function Viewer({ files }: ViewerProps) {
           : null
       );
 
-      // Debug metadata keys
       console.log("Metadata keys:", [...metadataMapRef.current.keys()]);
     };
 
@@ -401,25 +400,13 @@ function Viewer({ files }: ViewerProps) {
         let toolGroup = ToolGroupManager.getToolGroup(toolGroupId);
         if (!toolGroup) {
           toolGroup = ToolGroupManager.createToolGroup(toolGroupId)!;
-          const tools = [
-            ZoomTool,
-            WindowLevelTool,
-            PanTool,
-            LengthTool,
-            ArrowAnnotateTool,
-            AngleTool,
-            CircleROITool,
-            EllipticalROITool,
-            RectangleROITool,
-            PlanarRotateTool,
-          ];
-          tools.forEach((tool) => toolGroup.addTool(tool.toolName));
-          toolGroup.setToolActive(WindowLevelTool.toolName, {
+          TOOLS.forEach((tool) => toolGroup.addTool(tool.toolName));
+          toolGroup.setToolActive(activeTool, {
             bindings: [{ mouseButton: ToolsEnums.MouseBindings.Primary }],
           });
           toolGroup.addViewport(viewportId, renderingEngineId);
           toolGroupRef.current = toolGroup;
-          console.log("Tool group configured.");
+          console.log("Tool group configured with initial tool:", activeTool);
         }
       } catch (err) {
         console.error("Viewport setup failed:", err);
@@ -439,7 +426,7 @@ function Viewer({ files }: ViewerProps) {
         isViewportEnabled.current = false;
       }
     };
-  }, [isWadoInitialized, isViewportReady]);
+  }, [isWadoInitialized, isViewportReady, activeTool]);
 
   // Update stack
   useEffect(() => {
@@ -498,7 +485,6 @@ function Viewer({ files }: ViewerProps) {
 
         await viewport.setStack(selectedSeries.imageIds, currentIndex);
 
-        // Set canvas size
         const canvasElement = viewport.getCanvas();
         canvasElement.width = viewportRef.current.clientWidth;
         canvasElement.height = viewportRef.current.clientHeight;
@@ -508,7 +494,6 @@ function Viewer({ files }: ViewerProps) {
           `Canvas size: ${canvasElement.width}x${canvasElement.height}`
         );
 
-        // VOI defaults
         const DEFAULT_VOI = {
           CT: { windowCenter: 0, windowWidth: 400 },
           MR: { windowCenter: 500, windowWidth: 1000 },
@@ -562,7 +547,9 @@ function Viewer({ files }: ViewerProps) {
       } catch (err) {
         console.error("Stack update failed:", err);
         setError(
-          `Failed to render image: ${err instanceof Error ? err.message : ""}`
+          `Failed to render image: ${
+            err instanceof Error ? err.message : String(err)
+          }`
         );
       }
     };
@@ -580,10 +567,10 @@ function Viewer({ files }: ViewerProps) {
   useEffect(() => {
     if (!containerRef.current || !renderingEngineRef.current) return;
 
-    let timeoutRef;
+    let timeout: NodeJS.Timeout;
     const handleResize = () => {
-      clearTimeout(timeoutRef);
-      timeoutRef = setTimeout(() => {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => {
         if (viewportRef.current && containerRef.current) {
           const selectedSeries = seriesList.find(
             (s) => s.seriesInstanceUID === selectedSeriesUID
@@ -633,44 +620,32 @@ function Viewer({ files }: ViewerProps) {
 
     return () => {
       observer.disconnect();
-      clearTimeout(timeoutRef);
+      clearTimeout(timeout);
     };
   }, [selectedSeriesUID, currentIndex, seriesList]);
 
   // Update active tool
-  // Update the tool activation useEffect
   useEffect(() => {
     if (toolGroupRef.current && activeTool) {
       const viewport = renderingEngineRef.current?.getViewport(
         viewportId
       ) as cornerstone.Types.IStackViewport;
-      if (!viewport) return;
+      if (!viewport) {
+        console.warn("Viewport not valid, skipping tool activation.");
+        return;
+      }
 
-      // Get all available tool names
-      const allTools = [
-        ZoomTool.toolName,
-        WindowLevelTool.toolName,
-        PanTool.toolName,
-        LengthTool.toolName,
-        ArrowAnnotateTool.toolName,
-        AngleTool.toolName,
-        CircleROITool.toolName,
-        EllipticalROITool.toolName,
-        RectangleROITool.toolName,
-        PlanarRotateTool.toolName,
-      ];
-
-      // First set all tools to passive
-      allTools.forEach((toolName) => {
-        toolGroupRef.current.setToolPassive(toolName);
+      TOOLS.forEach((tool) => {
+        if (tool.toolName === activeTool) {
+          toolGroupRef.current.setToolActive(tool.toolName, {
+            bindings: [{ mouseButton: ToolsEnums.MouseBindings.Primary }],
+          });
+          console.log(`Activated tool: ${tool.toolName}`);
+        } else {
+          toolGroupRef.current.setToolPassive(tool.toolName);
+          console.log(`Set passive: ${tool.toolName}`);
+        }
       });
-
-      // Then activate only the selected tool
-      toolGroupRef.current.setToolActive(activeTool, {
-        bindings: [{ mouseButton: ToolsEnums.MouseBindings.Primary }],
-      });
-
-      console.log(`Tool activated: ${activeTool}, others deactivated`);
 
       const handleInteraction = () => {
         setZoomLevel(Math.round(viewport.getZoom() * 100));
@@ -685,8 +660,149 @@ function Viewer({ files }: ViewerProps) {
     }
   }, [activeTool]);
 
+  // Export current image
+  const exportImage = useCallback(() => {
+    if (
+      !renderingEngineRef.current ||
+      !viewportRef.current ||
+      !isViewportReady ||
+      !metadata
+    ) {
+      console.warn("Cannot export image: viewport or metadata not ready");
+      setError("No image loaded to export.");
+      return;
+    }
+
+    try {
+      const viewport = renderingEngineRef.current.getViewport(
+        viewportId
+      ) as cornerstone.Types.IStackViewport;
+      const canvas = viewport.getCanvas();
+      const { width, height } = canvas;
+
+      const exportCanvas = document.createElement("canvas");
+      exportCanvas.width = width;
+      exportCanvas.height = height;
+      const ctx = exportCanvas.getContext("2d")!;
+
+      // Draw the viewport image (includes tools and transformations)
+      ctx.drawImage(canvas, 0, 0);
+
+      // Add metadata overlays
+      const fontSize = 12;
+      ctx.font = `${fontSize}px sans-serif`;
+      ctx.textBaseline = "top";
+      const padding = 4;
+      const bgOpacity = 0.7;
+
+      // Top-left: Patient info
+      const tlText = [
+        `Patient: ${metadata.patientName || "N/A"}`,
+        `ID: ${metadata.patientID || "N/A"}`,
+      ];
+      const tlWidth =
+        Math.max(...tlText.map((t) => ctx.measureText(t).width)) + padding * 2;
+      const tlHeight = tlText.length * (fontSize + 2) + padding * 2;
+      ctx.fillStyle = `rgba(17, 24, 39, ${bgOpacity})`; // bg-gray-900
+      ctx.fillRect(2, 2, tlWidth, tlHeight);
+      ctx.fillStyle = "#10b981"; // text-emerald-500
+      tlText.forEach((text, i) =>
+        ctx.fillText(text, 2 + padding, 2 + padding + i * (fontSize + 2))
+      );
+
+      // Top-right: Study info
+      const trText = [
+        `Date: ${metadata.studyDate || "N/A"}`,
+        `Study: ${metadata.studyID || "N/A"}`,
+      ];
+      const trWidth =
+        Math.max(...trText.map((t) => ctx.measureText(t).width)) + padding * 2;
+      const trHeight = trText.length * (fontSize + 2) + padding * 2;
+      ctx.fillStyle = `rgba(17, 24, 39, ${bgOpacity})`;
+      ctx.fillRect(width - trWidth - 2, 2, trWidth, trHeight);
+      ctx.fillStyle = "#10b981";
+      trText.forEach((text, i) =>
+        ctx.fillText(
+          text,
+          width - trWidth - 2 + padding,
+          2 + padding + i * (fontSize + 2)
+        )
+      );
+
+      // Bottom-left: Modality info
+      const blText = [
+        `Modality: ${metadata.generalSeries?.modality || "N/A"}`,
+        `Institution: ${metadata.institutionName || "N/A"}`,
+      ];
+      const blWidth =
+        Math.max(...blText.map((t) => ctx.measureText(t).width)) + padding * 2;
+      const blHeight = blText.length * (fontSize + 2) + padding * 2;
+      ctx.fillStyle = `rgba(17, 24, 39, ${bgOpacity})`;
+      ctx.fillRect(2, height - blHeight - 2, blWidth, blHeight);
+      ctx.fillStyle = "#10b981";
+      blText.forEach((text, i) =>
+        ctx.fillText(
+          text,
+          2 + padding,
+          height - blHeight - 2 + padding + i * (fontSize + 2)
+        )
+      );
+
+      // Bottom-right: Series info
+      const brText = [
+        `Series: ${metadata.seriesInstanceUID?.slice(-8) || "N/A"}`,
+        `Image: ${currentIndex + 1} / ${
+          seriesList.find((s) => s.seriesInstanceUID === selectedSeriesUID)
+            ?.imageIds.length || 0
+        }`,
+        `WC/WW: ${metadata.windowCenter || "N/A"}/${
+          metadata.windowWidth || "N/A"
+        }`,
+      ];
+      const brWidth =
+        Math.max(...brText.map((t) => ctx.measureText(t).width)) + padding * 2;
+      const brHeight = brText.length * (fontSize + 2) + padding * 2;
+      ctx.fillStyle = `rgba(17, 24, 39, ${bgOpacity})`;
+      ctx.fillRect(
+        width - brWidth - 2,
+        height - brHeight - 2,
+        brWidth,
+        brHeight
+      );
+      ctx.fillStyle = "#10b981";
+      brText.forEach((text, i) =>
+        ctx.fillText(
+          text,
+          width - brWidth - 2 + padding,
+          height - brHeight - 2 + padding + i * (fontSize + 2)
+        )
+      );
+
+      // Generate filename
+      const patientID =
+        metadata.patientID?.replace(/[^a-zA-Z0-9]/g, "_") || "Unknown";
+      const seriesUID = metadata.seriesInstanceUID?.slice(-8) || "Unknown";
+      const filename = `${patientID}_${seriesUID}_Image${currentIndex + 1}.png`;
+
+      // Trigger download
+      const link = document.createElement("a");
+      link.href = exportCanvas.toDataURL("image/png");
+      link.download = filename;
+      link.click();
+      console.log(`Image exported as ${filename}`);
+    } catch (err) {
+      console.error("Image export failed:", err);
+      setError(
+        `Failed to export image: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      );
+    }
+  }, [isViewportReady, metadata, selectedSeriesUID, currentIndex, seriesList]);
+
   const activateTool = useCallback((toolName: string) => {
     setActiveTool(toolName);
+    console.log(`Tool selected: ${toolName}`);
   }, []);
 
   const fitToWindow = useCallback(() => {
@@ -953,7 +1069,7 @@ function Viewer({ files }: ViewerProps) {
             onClick={fitToWindow}
             title="Fit to Window"
           >
-            <Maximize size="20" />
+            <Maximize size={20} />
           </Button>
           <Button
             variant="outline"
@@ -961,7 +1077,16 @@ function Viewer({ files }: ViewerProps) {
             onClick={actualSize}
             title="Actual Size"
           >
-            <Minimize size="20" />
+            <Minimize size={20} />
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={exportImage}
+            title="Export Image"
+            disabled={!isViewportReady || !selectedSeriesUID}
+          >
+            <Download size={20} />
           </Button>
           <span className="px-2 text-sm text-gray-700">Zoom: {zoomLevel}%</span>
         </div>
@@ -980,21 +1105,21 @@ function Viewer({ files }: ViewerProps) {
           >
             {metadata && (
               <>
-                <div className="absolute top-2 left-2 text-emerald-500 text-s bg-gray-900 bg-opacity-70 p-1 rounded">
+                <div className="absolute top-2 left-2 text-emerald-500 text-s  bg-opacity-70 p-1 rounded">
                   <div>Patient: {metadata.patientName || "N/A"}</div>
                   <div>ID: {metadata.patientID || "N/A"}</div>
                 </div>
-                <div className="absolute top-2 right-2 text-emerald-500 text-s bg-gray-900 bg-opacity-70 p-1 rounded">
+                <div className="absolute top-2 right-2 text-emerald-500 text-s  bg-opacity-70 p-1 rounded">
                   <div>Date: {metadata.studyDate || "N/A"}</div>
                   <div>Study: {metadata.studyID || "N/A"}</div>
                 </div>
-                <div className="absolute bottom-2 left-2 text-emerald-500 text-s bg-gray-900 bg-opacity-70 p-1 rounded">
+                <div className="absolute bottom-2 left-2 text-emerald-500 text-s  bg-opacity-70 p-1 rounded">
                   <div>
                     Modality: {metadata.generalSeries?.modality || "N/A"}
                   </div>
                   <div>Institution: {metadata.institutionName || "N/A"}</div>
                 </div>
-                <div className="absolute bottom-2 right-2 text-emerald-500 text-s bg-gray-900 bg-opacity-70 p-1 rounded">
+                <div className="absolute bottom-2 right-2 text-emerald-500 text-s bg-opacity-70 p-1 rounded">
                   <div>
                     Series: {metadata.seriesInstanceUID?.slice(-8) || "N/A"}
                   </div>
