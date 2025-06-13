@@ -3,14 +3,25 @@ import FileUpload from "./components/FileUpload";
 import Viewer from "./components/Viewer";
 
 function App() {
-  const [files, setFiles] = useState<File[]>([]);
+  const [fileData, setFileData] = useState<
+    | {
+        files: File[];
+        uploadType: "single" | "multiple" | "series" | "study";
+        seriesGroups: Map<string, File[]>;
+      }
+    | undefined
+  >(undefined);
 
   return (
-    <div className="h-screen w-screen overflow-hidden">
-      {files.length === 0 ? (
-        <FileUpload setFiles={setFiles} />
+    <div className="h-screen">
+      {fileData ? (
+        <Viewer fileData={fileData} />
       ) : (
-        <Viewer files={files} />
+        <FileUpload
+          setFiles={(data) => {
+            setFileData(data);
+          }}
+        />
       )}
     </div>
   );

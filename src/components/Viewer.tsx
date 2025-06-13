@@ -50,10 +50,26 @@ interface Series {
 }
 
 interface ViewerProps {
-  files: File[];
+  fileData?: {
+    files: File[];
+    uploadType: "single" | "multiple" | "series" | "study";
+    seriesGroups: Map<string, File[]>;
+  };
 }
 
-function Viewer({ files }: ViewerProps) {
+function Viewer({ fileData }: ViewerProps) {
+  if (!fileData) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center text-gray-500 p-4">
+        <h3 className="text-lg font-medium mb-2">No Files Uploaded</h3>
+        <p className="text-sm">
+          Please upload DICOM files or a folder to view.
+        </p>
+      </div>
+    );
+  }
+
+  const { files, uploadType, seriesGroups } = fileData;
   const viewportRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -80,7 +96,6 @@ function Viewer({ files }: ViewerProps) {
   const metadataMapRef = useRef<Map<string, any>>(new Map());
   const VIEWPORT_SCALE = 0.9;
 
-  // Define all tools for consistent management
   const TOOLS = [
     ZoomTool,
     WindowLevelTool,
@@ -99,15 +114,16 @@ function Viewer({ files }: ViewerProps) {
     const initializeCore = async () => {
       if (!isCoreInitialized.current) {
         try {
-          console.log("Initializing Cornerstone3D...");
           await coreInit();
-          await dicomImageLoaderInit();
+          await dicomImageLoaderInit({
+            maxWebWorkers: navigator.hardwareConcurrency || 1,
+            codecsPath: "/codecs.js",
+          });
           await cornerstoneToolsInit();
           isCoreInitialized.current = true;
           setIsWadoInitialized(true);
-          console.log("Cornerstone3D, DICOM Loader, and Tools initialized.");
+          console.log("Cornerstone initialized");
         } catch (err) {
-          console.error("Initialization failed:", err);
           setError(
             `Initialization failed: ${
               err instanceof Error ? err.message : String(err)
@@ -122,23 +138,37 @@ function Viewer({ files }: ViewerProps) {
   // Register tools
   useEffect(() => {
     TOOLS.forEach(addTool);
-    console.log("Tools registered.");
   }, []);
 
-  // Generate thumbnail for series
+  // Generate thumbnail
   const generateThumbnail = async (imageId: string, series: Series) => {
     try {
       const image = await imageLoader.loadAndCacheImage(imageId);
+      const pixelData = image.getPixelData();
+      if (!pixelData) {
+        console.warn(`No pixel data for thumbnail: ${imageId}`);
+        return;
+      }
+      const { rows, columns, photometricInterpretation } =
+        metadataMapRef.current.get(imageId).imagePixelModule;
+
+      // Normalize pixel data for better contrast
+      let min = pixelData[0],
+        max = pixelData[0];
+      for (let i = 0; i < pixelData.length; i++) {
+        min = Math.min(min, pixelData[i]);
+        max = Math.max(max, pixelData[i]);
+      }
+      const range = max - min || 1;
+
       const canvas = document.createElement("canvas");
       canvas.width = 100;
       canvas.height = 100;
       const ctx = canvas.getContext("2d")!;
-      const pixelData = image.getPixelData();
-      const { rows, columns, photometricInterpretation } =
-        metadataMapRef.current.get(imageId).imagePixelModule;
       const imgData = ctx.createImageData(100, 100);
       const scaleX = columns / 100;
       const scaleY = rows / 100;
+
       for (let y = 0; y < 100; y++) {
         for (let x = 0; x < 100; x++) {
           const srcX = Math.floor(x * scaleX);
@@ -148,115 +178,105 @@ function Viewer({ files }: ViewerProps) {
             (photometricInterpretation.includes("MONOCHROME") ? 1 : 3);
           const dstIdx = (y * 100 + x) * 4;
           if (photometricInterpretation.includes("MONOCHROME")) {
-            const value = pixelData[srcIdx] || 0;
+            const value = ((pixelData[srcIdx] - min) / range) * 255;
             imgData.data[dstIdx] =
               imgData.data[dstIdx + 1] =
               imgData.data[dstIdx + 2] =
                 value;
             imgData.data[dstIdx + 3] = 255;
           } else {
-            imgData.data[dstIdx] = pixelData[srcIdx] || 0;
-            imgData.data[dstIdx + 1] = pixelData[srcIdx + 1] || 0;
-            imgData.data[dstIdx + 2] = pixelData[srcIdx + 2] || 0;
+            imgData.data[dstIdx] = ((pixelData[srcIdx] - min) / range) * 255;
+            imgData.data[dstIdx + 1] =
+              ((pixelData[srcIdx + 1] - min) / range) * 255;
+            imgData.data[dstIdx + 2] =
+              ((pixelData[srcIdx + 2] - min) / range) * 255;
             imgData.data[dstIdx + 3] = 255;
           }
         }
       }
       ctx.putImageData(imgData, 0, 0);
       series.thumbnail = canvas.toDataURL();
-      console.log(`Thumbnail generated for series ${series.seriesInstanceUID}`);
     } catch (err) {
       console.error(`Failed to generate thumbnail for ${imageId}:`, err);
     }
   };
 
-  // Process DICOM files
+  // Process files
   useEffect(() => {
     const processFiles = async () => {
       const seriesMap = new Map<string, Series>();
       const errors: string[] = [];
 
-      for (const file of files) {
-        try {
-          const arrayBuffer = await file.arrayBuffer();
-          const byteArray = new Uint8Array(arrayBuffer);
-          const dataset = dicomParser.parseDicom(byteArray);
+      for (const [groupKey, groupFiles] of seriesGroups) {
+        const seriesInstanceUID = groupKey;
+        let series: Series = seriesMap.get(seriesInstanceUID) || {
+          seriesInstanceUID,
+          seriesNumber: seriesMap.size + 1,
+          modality: "OT",
+          imageIds: [],
+        };
 
-          const seriesInstanceUID =
-            dataset.string("x0020000E") ||
-            `folder-${file.webkitRelativePath.split("/")[1] || "unknown"}`;
-          const seriesNumber = dataset.intString("x00200011") || 0;
-          const modality = dataset.string("x00080060") || "OT";
-          const transferSyntax =
-            dataset.string("x00020010") || "1.2.840.10008.1.2.1";
-          const blobUrl = URL.createObjectURL(file);
-          const imageId = `wadouri:${blobUrl}`;
-
-          metadataMapRef.current.set(imageId, {
-            transferSyntax: { TransferSyntaxUID: transferSyntax },
-            instanceNumber: dataset.intString("x00200013") || 0,
-            modality,
-            seriesInstanceUID,
-            windowCenter: dataset.string("x00281050"),
-            windowWidth: dataset.string("x00281051"),
-            imagePixelModule: {
-              samplesPerPixel:
-                dataset.uint16("x00280002") ||
-                (dataset.string("x00280004")?.includes("MONOCHROME") ? 1 : 3),
-              rows: dataset.uint16("x00280010") || 512,
-              columns: dataset.uint16("x00280011") || 512,
-              bitsAllocated: dataset.uint16("x00280100") || 8,
-              bitsStored: dataset.uint16("x00280101") || 8,
-              highBit: dataset.uint16("x00280102") || 7,
-              photometricInterpretation:
-                dataset.string("x00280004") || "YBR_FULL_422",
-              pixelRepresentation: dataset.uint16("x00280103") || 0,
-            },
-            generalSeriesModule: { modality, seriesInstanceUID, seriesNumber },
-            patientName: dataset.string("x00100010") || "Unknown",
-            patientID: dataset.string("x00100020") || "Unknown",
-            studyID: dataset.string("x00200010") || "Unknown",
-            studyDate: dataset.string("x00080020") || "Unknown",
-            institutionName: dataset.string("x00080080") || "Unknown",
-          });
-
-          if (!seriesMap.has(seriesInstanceUID)) {
-            seriesMap.set(seriesInstanceUID, {
+        for (const file of groupFiles) {
+          try {
+            const arrayBuffer = await file.arrayBuffer();
+            const byteArray = new Uint8Array(arrayBuffer);
+            const dataset = dicomParser.parseDicom(byteArray);
+            const transferSyntax =
+              dataset.string("x00020010") || "1.2.840.10008.1.2.1";
+            const imageId = `wadouri:${URL.createObjectURL(file)}`;
+            const modality = dataset.string("x00080060") || "OT";
+            series.modality = modality;
+            metadataMapRef.current.set(imageId, {
               seriesInstanceUID,
-              seriesNumber,
+              seriesNumber: series.seriesNumber,
               modality,
-              imageIds: [],
+              transferSyntax,
+              patientID: dataset.string("x00100020") || "Unknown",
+              patientName: dataset.string("x00100010") || "Unknown",
+              studyDate: dataset.string("x00080020") || "Unknown",
+              seriesDescription: dataset.string("x0008103E") || "Unknown",
+              sliceLocation: dataset.string("x00201041") || "Unknown",
+              instanceNumber: dataset.intString("x00200013") || 0,
+              windowCenter: dataset.string("x00281050"),
+              windowWidth: dataset.string("x00281051"),
+              imagePixelModule: {
+                rows: dataset.uint16("x00280010") || 512,
+                columns: dataset.uint16("x00280011") || 512,
+                photometricInterpretation:
+                  dataset.string("x00280004") || "MONOCHROME2",
+                bitsAllocated: dataset.uint16("x00280100") || 16,
+                bitsStored: dataset.uint16("x00280101") || 16,
+                pixelRepresentation: dataset.uint16("x00280103") || 0,
+              },
             });
-          }
-          const series = seriesMap.get(seriesInstanceUID)!;
-          series.imageIds.push(imageId);
 
-          if (series.imageIds.length === 1) {
-            await generateThumbnail(imageId, series);
-          }
+            series.imageIds.push(imageId);
 
-          console.log(
-            `Processed ${file.name}: ${imageId}, Series: ${seriesInstanceUID}`
-          );
-        } catch (err) {
-          console.error(`Failed to process ${file.name}:`, err);
-          errors.push(
-            `Failed to process ${file.name}: ${
-              err instanceof Error ? err.message : String(err)
-            }`
-          );
+            if (
+              (uploadType === "single" && series.imageIds.length === 1) ||
+              (uploadType === "multiple" && series.imageIds.length === 1) ||
+              (uploadType === "series" && series.imageIds.length === 1) ||
+              (uploadType === "study" && series.imageIds.length === 1)
+            ) {
+              await generateThumbnail(imageId, series);
+            }
+          } catch (err) {
+            errors.push(
+              `Failed to process ${file.name}: ${
+                err instanceof Error ? err.message : String(err)
+              }`
+            );
+          }
+        }
+
+        if (series.imageIds.length > 0) {
+          seriesMap.set(seriesInstanceUID, series);
         }
       }
 
       metaData.addProvider((type, id) => {
         const data = metadataMapRef.current.get(id);
-        if (data) {
-          if (type === "imagePixelModule" || type === "generalSeriesModule") {
-            return data[type];
-          }
-          return data[type.replace("Module", "")] || undefined;
-        }
-        return undefined;
+        return data ? data[type] || undefined : undefined;
       }, 100);
 
       const sortedSeries = Array.from(seriesMap.values()).sort(
@@ -266,6 +286,14 @@ function Viewer({ files }: ViewerProps) {
       if (sortedSeries.length > 0 && !selectedSeriesUID) {
         setSelectedSeriesUID(sortedSeries[0].seriesInstanceUID);
         setCurrentIndex(0);
+        setTimeout(() => {
+          window.dispatchEvent(new Event("resize"));
+          console.log(
+            "Initial series selected:",
+            sortedSeries[0].seriesInstanceUID,
+            { isViewportReady }
+          );
+        }, 100);
       }
       setError(
         errors.length > 0
@@ -275,127 +303,46 @@ function Viewer({ files }: ViewerProps) {
           : null
       );
 
-      console.log("Metadata keys:", [...metadataMapRef.current.keys()]);
+      return () => {
+        seriesList.forEach((series) =>
+          series.imageIds.forEach((id) =>
+            URL.revokeObjectURL(id.replace("wadouri:", ""))
+          )
+        );
+        metaData.removeProvider(() => true);
+        metadataMapRef.current.clear();
+      };
     };
 
     processFiles();
+  }, [files, uploadType, seriesGroups]);
 
-    return () => {
-      seriesList.forEach((series) =>
-        series.imageIds.forEach((id) => {
-          if (id.startsWith("wadouri:")) {
-            URL.revokeObjectURL(id.replace("wadouri:", ""));
-          }
-        })
-      );
-      metaData.removeProvider(() => true);
-      metadataMapRef.current.clear();
-    };
-  }, [files]);
-
-  // Adjust viewport size
+  // Setup and resize viewport
   useEffect(() => {
-    if (
-      !viewportRef.current ||
-      !containerRef.current ||
-      !selectedSeriesUID ||
-      !isWadoInitialized
-    ) {
-      console.log("Viewport size adjustment skipped: missing requirements");
+    if (!viewportRef.current || !containerRef.current || !isWadoInitialized) {
       setIsViewportReady(false);
       return;
     }
 
-    const selectedSeries = seriesList.find(
-      (s) => s.seriesInstanceUID === selectedSeriesUID
-    );
-    const imageId = selectedSeries?.imageIds[currentIndex];
-    const imageMetadata = imageId
-      ? metadataMapRef.current.get(imageId)
-      : undefined;
     const element = viewportRef.current;
     const container = containerRef.current;
-
-    console.log(
-      `Viewport size adjustment: selectedSeriesUID=${selectedSeriesUID}, seriesList.length=${seriesList.length}, ` +
-        `hasSelectedSeries=${!!selectedSeries}, hasImageMetadata=${!!imageMetadata}, currentIndex=${currentIndex}, imageId=${imageId}`
-    );
-
-    if (imageMetadata && selectedSeries && element && container && imageId) {
-      const { rows, columns } = imageMetadata.imagePixelModule;
-      const aspectRatio = columns / rows;
-      const containerAspect = container.clientWidth / container.clientHeight;
-
-      let width, height;
-      if (aspectRatio > containerAspect) {
-        width = container.clientWidth * VIEWPORT_SCALE;
-        height = width / aspectRatio;
-      } else {
-        height = container.clientHeight * VIEWPORT_SCALE;
-        width = height * aspectRatio;
-      }
-
-      element.style.width = `${width}px`;
-      element.style.height = `${height}px`;
-      console.log(
-        `Viewport size set: ${width}x${height}, Image: ${columns}x${rows}, Aspect: ${aspectRatio}, ` +
-          `Container: ${container.clientWidth}x${container.clientHeight}, Scale: ${VIEWPORT_SCALE}`
-      );
-      setIsViewportReady(true);
-    } else {
-      console.log(
-        "Viewport size not set: invalid series, metadata, or imageId"
-      );
-      if (selectedSeries && selectedSeries.imageIds.length > 0) {
-        setIsViewportReady(true);
-      } else {
-        element.style.width = "0px";
-        element.style.height = "0px";
-        setIsViewportReady(false);
-      }
-    }
-  }, [isWadoInitialized, seriesList, selectedSeriesUID, currentIndex]);
-
-  // Setup viewport and rendering engine
-  useEffect(() => {
-    if (
-      !viewportRef.current ||
-      !containerRef.current ||
-      !isCoreInitialized.current ||
-      !isWadoInitialized ||
-      !isViewportReady
-    ) {
-      console.log("Skipping viewport setup: missing requirements");
-      return;
-    }
+    let renderingEngine = renderingEngineRef.current;
 
     const setupViewport = async () => {
-      try {
-        const element = viewportRef.current!;
-        const renderingEngine =
-          renderingEngineRef.current || new RenderingEngine(renderingEngineId);
+      if (!renderingEngine) {
+        renderingEngine = new RenderingEngine(renderingEngineId);
         renderingEngineRef.current = renderingEngine;
+        console.log("RenderingEngine created");
+      }
 
-        if (!isViewportEnabled.current) {
-          renderingEngine.enableElement({
-            viewportId,
-            element,
-            type: Enums.ViewportType.STACK,
-          });
-          isViewportEnabled.current = true;
-
-          const viewport = renderingEngine.getViewport(
-            viewportId
-          ) as cornerstone.Types.IStackViewport;
-          const canvasElement = viewport.getCanvas();
-          canvasElement.width = element.clientWidth;
-          canvasElement.height = element.clientHeight;
-          canvasElement.style.width = `${element.clientWidth}px`;
-          canvasElement.style.height = `${element.clientHeight}px`;
-          console.log(
-            `Canvas size set: ${canvasElement.width}x${canvasElement.height}`
-          );
-        }
+      if (!isViewportEnabled.current) {
+        renderingEngine.enableElement({
+          viewportId,
+          element,
+          type: Enums.ViewportType.STACK,
+        });
+        isViewportEnabled.current = true;
+        console.log("Viewport enabled");
 
         let toolGroup = ToolGroupManager.getToolGroup(toolGroupId);
         if (!toolGroup) {
@@ -406,19 +353,67 @@ function Viewer({ files }: ViewerProps) {
           });
           toolGroup.addViewport(viewportId, renderingEngineId);
           toolGroupRef.current = toolGroup;
-          console.log("Tool group configured with initial tool:", activeTool);
+          console.log("ToolGroup created");
         }
-      } catch (err) {
-        console.error("Viewport setup failed:", err);
-        setError(
-          `Viewport error: ${err instanceof Error ? err.message : String(err)}`
-        );
+      }
+      // Set ready earlier to trigger initial render
+      setIsViewportReady(true);
+    };
+
+    const updateSize = () => {
+      const selectedSeries = seriesList.find(
+        (s) => s.seriesInstanceUID === selectedSeriesUID
+      );
+      const imageId = selectedSeries?.imageIds[currentIndex];
+      const imageMetadata = imageId
+        ? metadataMapRef.current.get(imageId)
+        : undefined;
+
+      if (imageMetadata && selectedSeries && imageId) {
+        const { rows, columns } = imageMetadata.imagePixelModule;
+        const aspectRatio = columns / rows;
+        const containerAspect = container.clientWidth / container.clientHeight;
+
+        let width = container.clientWidth * VIEWPORT_SCALE;
+        let height = width / aspectRatio;
+        if (aspectRatio < containerAspect) {
+          height = container.clientHeight * VIEWPORT_SCALE;
+          width = height * aspectRatio;
+        }
+
+        element.style.width = `${width}px`;
+        element.style.height = `${height}px`;
+
+        if (renderingEngine) {
+          const viewport = renderingEngine.getViewport(
+            viewportId
+          ) as cornerstone.Types.IStackViewport;
+          if (viewport) {
+            const canvas = viewport.getCanvas();
+            canvas.width = element.clientWidth;
+            canvas.height = element.clientHeight;
+            canvas.style.width = `${element.clientWidth}px`;
+            canvas.style.height = `${element.clientHeight}px`;
+            renderingEngine.resize();
+            viewport.render();
+            setZoomLevel(Math.round(viewport.getZoom() * 100));
+            console.log("Viewport resized:", { width, height });
+          }
+        }
+      } else {
+        setIsViewportReady(false);
+        console.log("Viewport not ready: missing metadata or series");
       }
     };
 
     setupViewport();
+    updateSize();
+
+    const observer = new ResizeObserver(() => updateSize());
+    observer.observe(container);
 
     return () => {
+      observer.disconnect();
       ToolGroupManager.destroyToolGroup(toolGroupId);
       if (renderingEngineRef.current) {
         renderingEngineRef.current.destroy();
@@ -426,7 +421,13 @@ function Viewer({ files }: ViewerProps) {
         isViewportEnabled.current = false;
       }
     };
-  }, [isWadoInitialized, isViewportReady, activeTool]);
+  }, [
+    isWadoInitialized,
+    seriesList,
+    selectedSeriesUID,
+    currentIndex,
+    activeTool,
+  ]);
 
   // Update stack
   useEffect(() => {
@@ -434,10 +435,14 @@ function Viewer({ files }: ViewerProps) {
       !renderingEngineRef.current ||
       !viewportRef.current ||
       !selectedSeriesUID ||
-      !isWadoInitialized ||
       !isViewportReady
     ) {
-      console.log("Skipping stack update: missing requirements");
+      console.log("Skipping stack update:", {
+        hasRenderingEngine: !!renderingEngineRef.current,
+        hasViewport: !!viewportRef.current,
+        selectedSeriesUID,
+        isViewportReady,
+      });
       return;
     }
 
@@ -445,7 +450,6 @@ function Viewer({ files }: ViewerProps) {
       (s) => s.seriesInstanceUID === selectedSeriesUID
     );
     if (!selectedSeries || selectedSeries.imageIds.length === 0) {
-      console.log("Invalid series selected");
       setError("Selected series is invalid or has no images.");
       return;
     }
@@ -455,99 +459,89 @@ function Viewer({ files }: ViewerProps) {
         const viewport = renderingEngineRef.current.getViewport(
           viewportId
         ) as cornerstone.Types.IStackViewport;
-        const imageId = selectedSeries.imageIds[currentIndex];
-        console.log(`Loading image: ${imageId}`);
-
-        const image = await imageLoader.loadAndCacheImage(imageId);
-        if (!image.getPixelData()) {
-          throw new Error("No pixel data available.");
+        let imageId = selectedSeries.imageIds[currentIndex];
+        let image;
+        let pixelData;
+        let attempts = 0;
+        const maxAttempts = selectedSeries.imageIds.length + 1;
+        while (attempts < maxAttempts) {
+          try {
+            image = await imageLoader.loadAndCacheImage(imageId);
+            pixelData = image.getPixelData();
+            if (!pixelData) {
+              throw new Error(`No pixel data available for ${imageId}`);
+            }
+            break; // Success, exit loop
+          } catch (err) {
+            console.warn(`Skipping image ${imageId}:`, err);
+            attempts++;
+            const nextIndex =
+              (currentIndex + attempts) % selectedSeries.imageIds.length;
+            imageId = selectedSeries.imageIds[nextIndex];
+            if (attempts === maxAttempts) {
+              throw new Error("No valid images found in series");
+            }
+          }
         }
 
+        console.log(`Rendering image: ${imageId}`, {
+          transferSyntax: metadataMapRef.current.get(imageId)?.transferSyntax,
+          photometricInterpretation:
+            metadataMapRef.current.get(imageId)?.imagePixelModule
+              ?.photometricInterpretation,
+          bitsAllocated:
+            metadataMapRef.current.get(imageId)?.imagePixelModule
+              ?.bitsAllocated,
+          bitsStored:
+            metadataMapRef.current.get(imageId)?.imagePixelModule?.bitsStored,
+          pixelDataLength: pixelData?.length,
+        });
+
         const imageMetadata = {
-          transferSyntax:
-            metaData.get("transferSyntax", imageId)?.TransferSyntaxUID ||
-            "Unknown",
-          pixelModule: metaData.get("imagePixelModule", imageId) || {},
-          generalSeries: metaData.get("generalSeriesModule", imageId) || {},
-          patientName: metaData.get("patientName", imageId) || "Unknown",
           patientID: metaData.get("patientID", imageId) || "Unknown",
-          studyID: metaData.get("studyID", imageId) || "Unknown",
+          patientName: metaData.get("patientName", imageId) || "Unknown",
           studyDate: metaData.get("studyDate", imageId) || "Unknown",
-          seriesInstanceUID:
-            metaData.get("seriesInstanceUID", imageId) || "Unknown",
+          seriesDescription:
+            metaData.get("seriesDescription", imageId) || "Unknown",
+          sliceLocation: metaData.get("sliceLocation", imageId) || "Unknown",
           instanceNumber: metaData.get("instanceNumber", imageId) || 0,
-          institutionName:
-            metaData.get("institutionName", imageId) || "Unknown",
+          modality: metaData.get("modality", imageId) || "OT",
           windowCenter: metaData.get("windowCenter", imageId),
           windowWidth: metaData.get("windowWidth", imageId),
+          pixelModule: metaData.get("imagePixelModule", imageId) || {},
         };
         setMetadata(imageMetadata);
 
         await viewport.setStack(selectedSeries.imageIds, currentIndex);
 
-        const canvasElement = viewport.getCanvas();
-        canvasElement.width = viewportRef.current.clientWidth;
-        canvasElement.height = viewportRef.current.clientHeight;
-        canvasElement.style.width = `${viewportRef.current.clientWidth}px`;
-        canvasElement.style.height = `${viewportRef.current.clientHeight}px`;
-        console.log(
-          `Canvas size: ${canvasElement.width}x${canvasElement.height}`
-        );
-
-        const DEFAULT_VOI = {
-          CT: { windowCenter: 0, windowWidth: 400 },
-          MR: { windowCenter: 500, windowWidth: 1000 },
-          MONOCHROME: (bitsAllocated: number) => ({
-            windowCenter: bitsAllocated === 16 ? 2048 : 128,
-            windowWidth: bitsAllocated === 16 ? 4096 : 256,
-          }),
-          DEFAULT: { windowCenter: 128, windowWidth: 256 },
-        };
+        const canvas = viewport.getCanvas();
+        canvas.width = viewportRef.current.clientWidth;
+        canvas.height = viewportRef.current.clientHeight;
+        canvas.style.width = `${viewportRef.current.clientWidth}px`;
+        canvas.style.height = `${viewportRef.current.clientHeight}px`;
 
         let windowCenter = parseFloat(imageMetadata.windowCenter);
         let windowWidth = parseFloat(imageMetadata.windowWidth);
-        const modality = imageMetadata.generalSeries.modality || "OT";
-        const photometric =
-          imageMetadata.pixelModule.photometricInterpretation || "MONOCHROME2";
-        const bitsAllocated = imageMetadata.pixelModule.bitsAllocated || 16;
-
-        if (
-          !windowCenter ||
-          !windowWidth ||
-          isNaN(windowCenter) ||
-          isNaN(windowWidth)
-        ) {
-          if (photometric.includes("MONOCHROME")) {
-            if (modality in DEFAULT_VOI) {
-              ({ windowCenter, windowWidth } = DEFAULT_VOI[modality]);
-            } else {
-              ({ windowCenter, windowWidth } =
-                DEFAULT_VOI.MONOCHROME(bitsAllocated));
-            }
-          } else {
-            ({ windowCenter, windowWidth } = DEFAULT_VOI.DEFAULT);
-          }
-          console.log(
-            `Applied default WC/WW for ${modality}/${photometric}: ${windowCenter}/${windowWidth}`
-          );
+        if (isNaN(windowCenter) || isNaN(windowWidth)) {
+          windowCenter = 128;
+          windowWidth = 256;
         }
 
-        const voiRange = {
-          lower: windowCenter - windowWidth / 2,
-          upper: windowCenter + windowWidth / 2,
-        };
-        viewport.setProperties({ voiRange });
+        viewport.setProperties({
+          voiRange: {
+            lower: windowCenter - windowWidth / 2,
+            upper: windowCenter + windowWidth / 2,
+          },
+        });
 
         viewport.reset();
         setZoomLevel(Math.round(viewport.getZoom() * 100));
         viewport.render();
-        renderingEngineRef.current.resize();
-
-        console.log(`Viewport rendered with imageId: ${imageId}`);
+        console.log(`Stack updated: ${imageId}`);
       } catch (err) {
-        console.error("Stack update failed:", err);
+        console.error(`Failed to update stack at index ${currentIndex}:`, err);
         setError(
-          `Failed to render image: ${
+          `Failed to render series: ${
             err instanceof Error ? err.message : String(err)
           }`
         );
@@ -555,74 +549,7 @@ function Viewer({ files }: ViewerProps) {
     };
 
     updateStack();
-  }, [
-    currentIndex,
-    selectedSeriesUID,
-    seriesList,
-    isWadoInitialized,
-    isViewportReady,
-  ]);
-
-  // Handle resize
-  useEffect(() => {
-    if (!containerRef.current || !renderingEngineRef.current) return;
-
-    let timeout: NodeJS.Timeout;
-    const handleResize = () => {
-      clearTimeout(timeout);
-      timeout = setTimeout(() => {
-        if (viewportRef.current && containerRef.current) {
-          const selectedSeries = seriesList.find(
-            (s) => s.seriesInstanceUID === selectedSeriesUID
-          );
-          const imageId = selectedSeries?.imageIds[currentIndex];
-          const imageMetadata = imageId
-            ? metadataMapRef.current.get(imageId)
-            : undefined;
-          if (imageMetadata && selectedSeries && imageId) {
-            const { rows, columns } = imageMetadata.imagePixelModule;
-            const aspectRatio = columns / rows;
-            const containerAspect =
-              containerRef.current.clientWidth /
-              containerRef.current.clientHeight;
-
-            let width = containerRef.current.clientWidth * VIEWPORT_SCALE;
-            let height = width / aspectRatio;
-            if (aspectRatio < containerAspect) {
-              height = containerRef.current.clientHeight * VIEWPORT_SCALE;
-              width = height * aspectRatio;
-            }
-
-            viewportRef.current.style.width = `${width}px`;
-            viewportRef.current.style.height = `${height}px`;
-
-            const viewport = renderingEngineRef.current.getViewport(
-              viewportId
-            ) as cornerstone.Types.IStackViewport;
-            if (viewport) {
-              const canvasElement = viewport.getCanvas();
-              canvasElement.width = viewportRef.current.clientWidth;
-              canvasElement.height = viewportRef.current.clientHeight;
-              canvasElement.style.width = `${viewportRef.current.clientWidth}px`;
-              canvasElement.style.height = `${viewportRef.current.clientHeight}px`;
-              renderingEngineRef.current.resize();
-              viewport.render();
-              setZoomLevel(Math.round(viewport.getZoom() * 100));
-              console.log(`Viewport resized: ${width}x${height}`);
-            }
-          }
-        }
-      }, 100);
-    };
-
-    const observer = new ResizeObserver(handleResize);
-    observer.observe(containerRef.current);
-
-    return () => {
-      observer.disconnect();
-      clearTimeout(timeout);
-    };
-  }, [selectedSeriesUID, currentIndex, seriesList]);
+  }, [currentIndex, selectedSeriesUID, seriesList, isViewportReady]);
 
   // Update active tool
   useEffect(() => {
@@ -631,22 +558,30 @@ function Viewer({ files }: ViewerProps) {
         viewportId
       ) as cornerstone.Types.IStackViewport;
       if (!viewport) {
-        console.warn("Viewport not valid, skipping tool activation.");
+        console.log("No viewport available for tool activation");
         return;
       }
 
-      TOOLS.forEach((tool) => {
-        if (tool.toolName === activeTool) {
-          toolGroupRef.current.setToolActive(tool.toolName, {
-            bindings: [{ mouseButton: ToolsEnums.MouseBindings.Primary }],
-          });
-          console.log(`Activated tool: ${tool.toolName}`);
-        } else {
-          toolGroupRef.current.setToolPassive(tool.toolName);
-          console.log(`Set passive: ${tool.toolName}`);
-        }
+      const selectedSeries = seriesList.find(
+        (s) => s.seriesInstanceUID === selectedSeriesUID
+      );
+      if (!selectedSeries || !selectedSeries.imageIds[currentIndex]) {
+        console.log("No valid series or image for tool activation");
+        return;
+      }
+
+      TOOLS.forEach((tool) =>
+        toolGroupRef.current.setToolPassive(tool.toolName)
+      );
+      toolGroupRef.current.setToolActive(activeTool, {
+        bindings: [{ mouseButton: ToolsEnums.MouseBindings.Primary }],
       });
 
+      // Restore stack to prevent image disappearance
+      viewport.setStack(selectedSeries.imageIds, currentIndex).then(() => {
+        viewport.render();
+        console.log(`Tool activated: ${activeTool}, stack restored`);
+      });
       const handleInteraction = () => {
         setZoomLevel(Math.round(viewport.getZoom() * 100));
       };
@@ -658,9 +593,9 @@ function Viewer({ files }: ViewerProps) {
         canvas.removeEventListener("wheel", handleInteraction);
       };
     }
-  }, [activeTool]);
+  }, [activeTool, selectedSeriesUID, currentIndex, seriesList]);
 
-  // Export current image
+  // Export image
   const exportImage = useCallback(() => {
     if (
       !renderingEngineRef.current ||
@@ -668,7 +603,6 @@ function Viewer({ files }: ViewerProps) {
       !isViewportReady ||
       !metadata
     ) {
-      console.warn("Cannot export image: viewport or metadata not ready");
       setError("No image loaded to export.");
       return;
     }
@@ -685,10 +619,8 @@ function Viewer({ files }: ViewerProps) {
       exportCanvas.height = height;
       const ctx = exportCanvas.getContext("2d")!;
 
-      // Draw the viewport image (includes tools and transformations)
       ctx.drawImage(canvas, 0, 0);
 
-      // Add metadata overlays
       const fontSize = 12;
       ctx.font = `${fontSize}px sans-serif`;
       ctx.textBaseline = "top";
@@ -703,9 +635,9 @@ function Viewer({ files }: ViewerProps) {
       const tlWidth =
         Math.max(...tlText.map((t) => ctx.measureText(t).width)) + padding * 2;
       const tlHeight = tlText.length * (fontSize + 2) + padding * 2;
-      ctx.fillStyle = `rgba(17, 24, 39, ${bgOpacity})`; // bg-gray-900
+      ctx.fillStyle = `rgba(17, 24, 39, ${bgOpacity})`;
       ctx.fillRect(2, 2, tlWidth, tlHeight);
-      ctx.fillStyle = "#10b981"; // text-emerald-500
+      ctx.fillStyle = "#10b981";
       tlText.forEach((text, i) =>
         ctx.fillText(text, 2 + padding, 2 + padding + i * (fontSize + 2))
       );
@@ -713,7 +645,7 @@ function Viewer({ files }: ViewerProps) {
       // Top-right: Study info
       const trText = [
         `Date: ${metadata.studyDate || "N/A"}`,
-        `Study: ${metadata.studyID || "N/A"}`,
+        `Series: ${metadata.seriesDescription || "N/A"}`,
       ];
       const trWidth =
         Math.max(...trText.map((t) => ctx.measureText(t).width)) + padding * 2;
@@ -731,8 +663,8 @@ function Viewer({ files }: ViewerProps) {
 
       // Bottom-left: Modality info
       const blText = [
-        `Modality: ${metadata.generalSeries?.modality || "N/A"}`,
-        `Institution: ${metadata.institutionName || "N/A"}`,
+        `Modality: ${metadata.modality || "N/A"}`,
+        `Location: ${metadata.sliceLocation || "N/A"}`,
       ];
       const blWidth =
         Math.max(...blText.map((t) => ctx.measureText(t).width)) + padding * 2;
@@ -748,10 +680,9 @@ function Viewer({ files }: ViewerProps) {
         )
       );
 
-      // Bottom-right: Series info
+      // Bottom-right: Slice and WC/WW
       const brText = [
-        `Series: ${metadata.seriesInstanceUID?.slice(-8) || "N/A"}`,
-        `Image: ${currentIndex + 1} / ${
+        `Slice: ${metadata.instanceNumber || "N/A"} / ${
           seriesList.find((s) => s.seriesInstanceUID === selectedSeriesUID)
             ?.imageIds.length || 0
         }`,
@@ -778,20 +709,17 @@ function Viewer({ files }: ViewerProps) {
         )
       );
 
-      // Generate filename
       const patientID =
         metadata.patientID?.replace(/[^a-zA-Z0-9]/g, "_") || "Unknown";
-      const seriesUID = metadata.seriesInstanceUID?.slice(-8) || "Unknown";
+      const seriesUID =
+        metadata.seriesDescription?.replace(/[^a-zA-Z0-9]/g, "_") || "Unknown";
       const filename = `${patientID}_${seriesUID}_Image${currentIndex + 1}.png`;
 
-      // Trigger download
       const link = document.createElement("a");
       link.href = exportCanvas.toDataURL("image/png");
       link.download = filename;
       link.click();
-      console.log(`Image exported as ${filename}`);
     } catch (err) {
-      console.error("Image export failed:", err);
       setError(
         `Failed to export image: ${
           err instanceof Error ? err.message : String(err)
@@ -802,7 +730,6 @@ function Viewer({ files }: ViewerProps) {
 
   const activateTool = useCallback((toolName: string) => {
     setActiveTool(toolName);
-    console.log(`Tool selected: ${toolName}`);
   }, []);
 
   const fitToWindow = useCallback(() => {
@@ -828,7 +755,6 @@ function Viewer({ files }: ViewerProps) {
         viewport.resetCamera();
         setZoomLevel(Math.round(viewport.getZoom() * 100));
         viewport.render();
-        console.log(`Fit to window: zoom=${scale}`);
       }
     }
   }, [selectedSeriesUID, currentIndex, seriesList]);
@@ -841,7 +767,6 @@ function Viewer({ files }: ViewerProps) {
       viewport.setZoom(1.0);
       setZoomLevel(100);
       viewport.render();
-      console.log("Actual size: zoom=1.0");
     }
   }, []);
 
@@ -863,7 +788,7 @@ function Viewer({ files }: ViewerProps) {
         );
         if (nextIndex !== currentIndex) {
           setCurrentIndex(nextIndex);
-          console.log("Scroll to:", nextIndex);
+          console.log(`Scrolled to index: ${nextIndex}`);
         }
       }
     },
@@ -885,13 +810,11 @@ function Viewer({ files }: ViewerProps) {
       if (!selectedSeries) return;
       if (event.key === "ArrowLeft" && currentIndex > 0) {
         setCurrentIndex(currentIndex - 1);
-        console.log("Previous image:", currentIndex - 1);
       } else if (
         event.key === "ArrowRight" &&
         currentIndex < selectedSeries.imageIds.length - 1
       ) {
         setCurrentIndex(currentIndex + 1);
-        console.log("Next image:", currentIndex + 1);
       }
     },
     [currentIndex, selectedSeriesUID, seriesList]
@@ -908,12 +831,10 @@ function Viewer({ files }: ViewerProps) {
       if (series && series.imageIds.length > 0) {
         setSelectedSeriesUID(seriesUID);
         setCurrentIndex(0);
-        console.log(
-          "Selected series:",
-          seriesUID,
-          "Images:",
-          series.imageIds.length
-        );
+        setTimeout(() => {
+          window.dispatchEvent(new Event("resize"));
+          console.log("Series selected:", seriesUID, { isViewportReady });
+        }, 100);
       } else {
         setError("Invalid or empty series selected.");
       }
@@ -937,163 +858,284 @@ function Viewer({ files }: ViewerProps) {
   }
 
   return (
-    <div className="h-full flex">
-      <div className="w-50 bg-gray-900 text-white flex flex-col overflow-y-auto">
-        <div className="p-2 text-sm font-medium border-b border-gray-700">
-          Study
+    <div className="h-full flex flex-col md:flex-row bg-gray-50">
+      {/* Sidebar */}
+      <div className="w-full md:w-56 lg:w-64 bg-white border-r border-gray-200 flex flex-col h-auto md:h-full">
+        <div className="p-3 border-b border-gray-200">
+          <h3 className="text-sm font-medium text-gray-700 uppercase tracking-wider">
+            {uploadType === "single"
+              ? "File"
+              : uploadType === "multiple"
+              ? "Files"
+              : uploadType === "series"
+              ? "Series"
+              : "Study"}
+          </h3>
         </div>
-        {seriesList.map((series) => (
-          <div
-            key={series.seriesInstanceUID}
-            className={`p-2 cursor-pointer hover:bg-gray-700 ${
-              selectedSeriesUID === series.seriesInstanceUID
-                ? "bg-gray-600"
-                : ""
-            }`}
-            onClick={() => handleSeriesSelect(series.seriesInstanceUID)}
-          >
-            <div className="text-xs mb-1">Series {series.seriesNumber}</div>
-            <div className="text-xs mb-1">{series.modality}</div>
-            {series.thumbnail ? (
-              <img
-                src={series.thumbnail}
-                alt="Thumbnail"
-                className="w-full h-auto"
-              />
-            ) : (
-              <div className="w-full h-20 bg-gray-800 flex items-center justify-center text-xs">
-                No Thumbnail
+
+        <div className="flex-1 overflow-y-auto">
+          {seriesList.map((series) => (
+            <div
+              key={series.seriesInstanceUID}
+              className={`p-3 border-b border-gray-100 cursor-pointer transition-colors ${
+                selectedSeriesUID === series.seriesInstanceUID
+                  ? "bg-blue-50 border-l-4 border-l-blue-500"
+                  : "hover:bg-gray-50"
+              }`}
+              onClick={() => handleSeriesSelect(series.seriesInstanceUID)}
+            >
+              <div className="flex items-start">
+                {series.thumbnail ? (
+                  <div className="mr-3 flex-shrink-0">
+                    <img
+                      src={series.thumbnail}
+                      alt="Series thumbnail"
+                      className="h-12 w-12 rounded-sm object-cover border border-gray-200"
+                    />
+                  </div>
+                ) : (
+                  <div className="mr-3 flex-shrink-0 h-12 w-12 bg-gray-100 rounded-sm border border-gray-200 flex items-center justify-center text-gray-400 text-xs">
+                    No Image
+                  </div>
+                )}
+
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-gray-900 truncate">
+                    {uploadType === "single" || uploadType === "multiple"
+                      ? series.seriesInstanceUID
+                      : `Series ${series.seriesNumber}`}
+                  </p>
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-gray-500">
+                      {series.modality}
+                    </span>
+                    <span className="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full">
+                      {series.imageIds.length}
+                    </span>
+                  </div>
+                </div>
               </div>
-            )}
-            <div className="text-xs mt-1">Images: {series.imageIds.length}</div>
-          </div>
-        ))}
-      </div>
-      <div className="flex-1 flex flex-col">
-        <div className="border-b px-4 py-2 flex h-20 gap-2 bg-gray-100">
-          <Button
-            variant={activeTool === ZoomTool.toolName ? "default" : "outline"}
-            size="icon"
-            onClick={() => activateTool(ZoomTool.toolName)}
-            title="Zoom"
-          >
-            <ZoomIn size={20} />
-          </Button>
-          <Button
-            variant={activeTool === PanTool.toolName ? "default" : "outline"}
-            size="icon"
-            onClick={() => activateTool(PanTool.toolName)}
-            title="Pan"
-          >
-            <Hand size={20} />
-          </Button>
-          <Button
-            variant={
-              activeTool === WindowLevelTool.toolName ? "default" : "outline"
-            }
-            size="icon"
-            onClick={() => activateTool(WindowLevelTool.toolName)}
-            title="Window Level/Width"
-          >
-            <Sliders size={20} />
-          </Button>
-          <Button
-            variant={activeTool === LengthTool.toolName ? "default" : "outline"}
-            size="icon"
-            onClick={() => activateTool(LengthTool.toolName)}
-            title="Measure Length"
-          >
-            <Ruler size={20} />
-          </Button>
-          <Button
-            variant={
-              activeTool === ArrowAnnotateTool.toolName ? "default" : "outline"
-            }
-            size="icon"
-            onClick={() => activateTool(ArrowAnnotateTool.toolName)}
-            title="Arrow Annotate"
-          >
-            <Pen size={20} />
-          </Button>
-          <Button
-            variant={activeTool === AngleTool.toolName ? "default" : "outline"}
-            size="icon"
-            onClick={() => activateTool(AngleTool.toolName)}
-            title="Measure Angle"
-          >
-            <Ruler size={20} />
-          </Button>
-          <Button
-            variant={
-              activeTool === CircleROITool.toolName ? "default" : "outline"
-            }
-            size="icon"
-            onClick={() => activateTool(CircleROITool.toolName)}
-            title="Circle Annotation"
-          >
-            <Circle size={20} />
-          </Button>
-          <Button
-            variant={
-              activeTool === EllipticalROITool.toolName ? "default" : "outline"
-            }
-            size="icon"
-            onClick={() => activateTool(EllipticalROITool.toolName)}
-            title="Ellipse Annotation"
-          >
-            <Circle size={20} />
-          </Button>
-          <Button
-            variant={
-              activeTool === RectangleROITool.toolName ? "default" : "outline"
-            }
-            size="icon"
-            onClick={() => activateTool(RectangleROITool.toolName)}
-            title="Rectangle Annotation"
-          >
-            <Square size={20} />
-          </Button>
-          <Button
-            variant={
-              activeTool === PlanarRotateTool.toolName ? "default" : "outline"
-            }
-            size="icon"
-            onClick={() => activateTool(PlanarRotateTool.toolName)}
-            title="Rotate"
-          >
-            <RotateCw size={20} />
-          </Button>
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={fitToWindow}
-            title="Fit to Window"
-          >
-            <Maximize size={20} />
-          </Button>
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={actualSize}
-            title="Actual Size"
-          >
-            <Minimize size={20} />
-          </Button>
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={exportImage}
-            title="Export Image"
-            disabled={!isViewportReady || !selectedSeriesUID}
-          >
-            <Download size={20} />
-          </Button>
-          <span className="px-2 text-sm text-gray-700">Zoom: {zoomLevel}%</span>
+            </div>
+          ))}
         </div>
+      </div>
+
+      {/* Main content area */}
+      <div className="flex-1 flex flex-col h-full overflow-hidden">
+        {/* Toolbar - Compact and organized */}
+        <div className="bg-white border-b border-gray-200 px-3 py-2 flex items-center overflow-x-auto">
+          <div className="flex space-x-1">
+            {/* Navigation controls */}
+            {selectedSeriesUID &&
+              seriesList.find((s) => s.seriesInstanceUID === selectedSeriesUID)
+                ?.imageIds.length > 1 && (
+                <div className="flex items-center mr-2 border-r border-gray-200 pr-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 w-8 p-0"
+                    onClick={() =>
+                      setCurrentIndex(Math.max(0, currentIndex - 1))
+                    }
+                    disabled={currentIndex === 0}
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <span className="mx-1 text-sm text-gray-600 whitespace-nowrap">
+                    {currentIndex + 1} /{" "}
+                    {seriesList.find(
+                      (s) => s.seriesInstanceUID === selectedSeriesUID
+                    )?.imageIds.length || 0}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 w-8 p-0"
+                    onClick={() =>
+                      setCurrentIndex(
+                        Math.min(
+                          seriesList.find(
+                            (s) => s.seriesInstanceUID === selectedSeriesUID
+                          )?.imageIds.length - 1 || 0,
+                          currentIndex + 1
+                        )
+                      )
+                    }
+                    disabled={
+                      currentIndex ===
+                      (seriesList.find(
+                        (s) => s.seriesInstanceUID === selectedSeriesUID
+                      )?.imageIds.length || 0) -
+                        1
+                    }
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              )}
+
+            {/* Tool buttons - grouped by functionality */}
+            <div className="flex space-x-1">
+              {/* View tools */}
+              <Button
+                variant={activeTool === ZoomTool.toolName ? "default" : "ghost"}
+                size="sm"
+                className="h-8 w-8 p-0"
+                onClick={() => activateTool(ZoomTool.toolName)}
+                title="Zoom"
+              >
+                <ZoomIn className="h-4 w-4" />
+              </Button>
+              <Button
+                variant={activeTool === PanTool.toolName ? "default" : "ghost"}
+                size="sm"
+                className="h-8 w-8 p-0"
+                onClick={() => activateTool(PanTool.toolName)}
+                title="Pan"
+              >
+                <Hand className="h-4 w-4" />
+              </Button>
+              <Button
+                variant={
+                  activeTool === WindowLevelTool.toolName ? "default" : "ghost"
+                }
+                size="sm"
+                className="h-8 w-8 p-0"
+                onClick={() => activateTool(WindowLevelTool.toolName)}
+                title="Window Level/Width"
+              >
+                <Sliders className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <div className="border-l border-gray-200 mx-1 h-6"></div>
+
+            {/* Measurement tools */}
+            <div className="flex space-x-1">
+              <Button
+                variant={
+                  activeTool === LengthTool.toolName ? "default" : "ghost"
+                }
+                size="sm"
+                className="h-8 w-8 p-0"
+                onClick={() => activateTool(LengthTool.toolName)}
+                title="Measure Length"
+              >
+                <Ruler className="h-4 w-4" />
+              </Button>
+              <Button
+                variant={
+                  activeTool === AngleTool.toolName ? "default" : "ghost"
+                }
+                size="sm"
+                className="h-8 w-8 p-0"
+                onClick={() => activateTool(AngleTool.toolName)}
+                title="Measure Angle"
+              >
+                <Ruler className="h-4 w-4 transform rotate-45" />
+              </Button>
+            </div>
+
+            <div className="border-l border-gray-200 mx-1 h-6"></div>
+
+            {/* Annotation tools */}
+            <div className="flex space-x-1">
+              <Button
+                variant={
+                  activeTool === ArrowAnnotateTool.toolName
+                    ? "default"
+                    : "ghost"
+                }
+                size="sm"
+                className="h-8 w-8 p-0"
+                onClick={() => activateTool(ArrowAnnotateTool.toolName)}
+                title="Arrow Annotate"
+              >
+                <Pen className="h-4 w-4" />
+              </Button>
+              <Button
+                variant={
+                  activeTool === CircleROITool.toolName ? "default" : "ghost"
+                }
+                size="sm"
+                className="h-8 w-8 p-0"
+                onClick={() => activateTool(CircleROITool.toolName)}
+                title="Circle Annotation"
+              >
+                <Circle className="h-4 w-4" />
+              </Button>
+              <Button
+                variant={
+                  activeTool === RectangleROITool.toolName ? "default" : "ghost"
+                }
+                size="sm"
+                className="h-8 w-8 p-0"
+                onClick={() => activateTool(RectangleROITool.toolName)}
+                title="Rectangle Annotation"
+              >
+                <Square className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <div className="border-l border-gray-200 mx-1 h-6"></div>
+
+            {/* View controls */}
+            <div className="flex space-x-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 w-8 p-0"
+                onClick={fitToWindow}
+                title="Fit to Window"
+              >
+                <Maximize className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 w-8 p-0"
+                onClick={actualSize}
+                title="Actual Size"
+              >
+                <Minimize className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 w-8 p-0"
+                onClick={() => activateTool(PlanarRotateTool.toolName)}
+                title="Rotate"
+              >
+                <RotateCw className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <div className="border-l border-gray-200 mx-1 h-6"></div>
+
+            {/* Export */}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 w-8 p-0"
+              onClick={exportImage}
+              title="Export Image"
+              disabled={!isViewportReady || !selectedSeriesUID}
+            >
+              <Download className="h-4 w-4" />
+            </Button>
+          </div>
+
+          <div className="ml-auto flex items-center">
+            <span className="text-sm text-gray-600 mr-2">
+              Zoom: {zoomLevel}%
+            </span>
+          </div>
+        </div>
+
+        {/* Viewport area */}
         <div
           ref={containerRef}
-          className="flex-1 bg-black relative overflow-hidden flex items-center justify-center"
-          style={{ minHeight: "0" }}
+          className="flex-1 bg-gray-100 relative overflow-hidden flex items-center justify-center"
         >
           <div
             ref={viewportRef}
@@ -1105,26 +1147,27 @@ function Viewer({ files }: ViewerProps) {
           >
             {metadata && (
               <>
-                <div className="absolute top-2 left-2 text-emerald-500 text-s  bg-opacity-70 p-1 rounded">
-                  <div>Patient: {metadata.patientName || "N/A"}</div>
+                <div className="absolute top-2 left-2 text-sky-500 text-xs bg-black bg-opacity-60 p-1.5 rounded">
+                  <div className="font-medium">
+                    Patient: {metadata.patientName || "N/A"}
+                  </div>
                   <div>ID: {metadata.patientID || "N/A"}</div>
                 </div>
-                <div className="absolute top-2 right-2 text-emerald-500 text-s  bg-opacity-70 p-1 rounded">
-                  <div>Date: {metadata.studyDate || "N/A"}</div>
-                  <div>Study: {metadata.studyID || "N/A"}</div>
-                </div>
-                <div className="absolute bottom-2 left-2 text-emerald-500 text-s  bg-opacity-70 p-1 rounded">
-                  <div>
-                    Modality: {metadata.generalSeries?.modality || "N/A"}
+                <div className="absolute top-2 right-2 text-sky-500 text-xs bg-black bg-opacity-60 p-1.5 rounded">
+                  <div className="font-medium">
+                    Date: {metadata.studyDate || "N/A"}
                   </div>
-                  <div>Institution: {metadata.institutionName || "N/A"}</div>
+                  <div>Series: {metadata.seriesDescription || "N/A"}</div>
                 </div>
-                <div className="absolute bottom-2 right-2 text-emerald-500 text-s bg-opacity-70 p-1 rounded">
-                  <div>
-                    Series: {metadata.seriesInstanceUID?.slice(-8) || "N/A"}
+                <div className="absolute bottom-2 left-2 text-sky-500 text-xs bg-black bg-opacity-60 p-1.5 rounded">
+                  <div className="font-medium">
+                    Modality: {metadata.modality || "N/A"}
                   </div>
-                  <div>
-                    Image: {currentIndex + 1} /{" "}
+                  <div>Location: {metadata.sliceLocation || "N/A"}</div>
+                </div>
+                <div className="absolute bottom-2 right-2 text-sky-500 text-xs bg-black bg-opacity-60 p-1.5 rounded">
+                  <div className="font-medium">
+                    Slice: {metadata.instanceNumber || "N/A"} /{" "}
                     {seriesList.find(
                       (s) => s.seriesInstanceUID === selectedSeriesUID
                     )?.imageIds.length || 0}
@@ -1137,50 +1180,6 @@ function Viewer({ files }: ViewerProps) {
               </>
             )}
           </div>
-          {selectedSeriesUID &&
-            seriesList.find((s) => s.seriesInstanceUID === selectedSeriesUID)
-              ?.imageIds.length > 1 && (
-              <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-white rounded-lg px-2 py-1 flex gap-1">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setCurrentIndex(Math.max(0, currentIndex - 1))}
-                  disabled={currentIndex === 0}
-                >
-                  <ChevronLeft size={20} />
-                </Button>
-                <span className="px-2 text-sm">
-                  {currentIndex + 1} /{" "}
-                  {seriesList.find(
-                    (s) => s.seriesInstanceUID === selectedSeriesUID
-                  )?.imageIds.length || 0}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => {
-                    const selectedSeries = seriesList.find(
-                      (s) => s.seriesInstanceUID === selectedSeriesUID
-                    );
-                    const nextIndex = Math.min(
-                      selectedSeries?.imageIds.length - 1 || 0,
-                      currentIndex + 1
-                    );
-                    console.log("Navigating to next image:", nextIndex);
-                    setCurrentIndex(nextIndex);
-                  }}
-                  disabled={
-                    currentIndex ===
-                    (seriesList.find(
-                      (s) => s.seriesInstanceUID === selectedSeriesUID
-                    )?.imageIds.length || 0) -
-                      1
-                  }
-                >
-                  <ChevronRight size={20} />
-                </Button>
-              </div>
-            )}
         </div>
       </div>
     </div>
