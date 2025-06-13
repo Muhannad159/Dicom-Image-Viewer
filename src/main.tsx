@@ -6,6 +6,6 @@ import Trial from "./components/Trial.tsx";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App />
+    <Trial />
   </StrictMode>
 );
