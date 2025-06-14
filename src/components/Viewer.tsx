@@ -613,108 +613,16 @@ function Viewer({ fileData }: ViewerProps) {
       ) as cornerstone.Types.IStackViewport;
       const canvas = viewport.getCanvas();
       const { width, height } = canvas;
-
       const exportCanvas = document.createElement("canvas");
       exportCanvas.width = width;
       exportCanvas.height = height;
       const ctx = exportCanvas.getContext("2d")!;
-
       ctx.drawImage(canvas, 0, 0);
-
-      const fontSize = 12;
-      ctx.font = `${fontSize}px sans-serif`;
-      ctx.textBaseline = "top";
-      const padding = 4;
-      const bgOpacity = 0.7;
-
-      // Top-left: Patient info
-      const tlText = [
-        `Patient: ${metadata.patientName || "N/A"}`,
-        `ID: ${metadata.patientID || "N/A"}`,
-      ];
-      const tlWidth =
-        Math.max(...tlText.map((t) => ctx.measureText(t).width)) + padding * 2;
-      const tlHeight = tlText.length * (fontSize + 2) + padding * 2;
-      ctx.fillStyle = `rgba(17, 24, 39, ${bgOpacity})`;
-      ctx.fillRect(2, 2, tlWidth, tlHeight);
-      ctx.fillStyle = "#10b981";
-      tlText.forEach((text, i) =>
-        ctx.fillText(text, 2 + padding, 2 + padding + i * (fontSize + 2))
-      );
-
-      // Top-right: Study info
-      const trText = [
-        `Date: ${metadata.studyDate || "N/A"}`,
-        `Series: ${metadata.seriesDescription || "N/A"}`,
-      ];
-      const trWidth =
-        Math.max(...trText.map((t) => ctx.measureText(t).width)) + padding * 2;
-      const trHeight = trText.length * (fontSize + 2) + padding * 2;
-      ctx.fillStyle = `rgba(17, 24, 39, ${bgOpacity})`;
-      ctx.fillRect(width - trWidth - 2, 2, trWidth, trHeight);
-      ctx.fillStyle = "#10b981";
-      trText.forEach((text, i) =>
-        ctx.fillText(
-          text,
-          width - trWidth - 2 + padding,
-          2 + padding + i * (fontSize + 2)
-        )
-      );
-
-      // Bottom-left: Modality info
-      const blText = [
-        `Modality: ${metadata.modality || "N/A"}`,
-        `Location: ${metadata.sliceLocation || "N/A"}`,
-      ];
-      const blWidth =
-        Math.max(...blText.map((t) => ctx.measureText(t).width)) + padding * 2;
-      const blHeight = blText.length * (fontSize + 2) + padding * 2;
-      ctx.fillStyle = `rgba(17, 24, 39, ${bgOpacity})`;
-      ctx.fillRect(2, height - blHeight - 2, blWidth, blHeight);
-      ctx.fillStyle = "#10b981";
-      blText.forEach((text, i) =>
-        ctx.fillText(
-          text,
-          2 + padding,
-          height - blHeight - 2 + padding + i * (fontSize + 2)
-        )
-      );
-
-      // Bottom-right: Slice and WC/WW
-      const brText = [
-        `Slice: ${metadata.instanceNumber || "N/A"} / ${
-          seriesList.find((s) => s.seriesInstanceUID === selectedSeriesUID)
-            ?.imageIds.length || 0
-        }`,
-        `WC/WW: ${metadata.windowCenter || "N/A"}/${
-          metadata.windowWidth || "N/A"
-        }`,
-      ];
-      const brWidth =
-        Math.max(...brText.map((t) => ctx.measureText(t).width)) + padding * 2;
-      const brHeight = brText.length * (fontSize + 2) + padding * 2;
-      ctx.fillStyle = `rgba(17, 24, 39, ${bgOpacity})`;
-      ctx.fillRect(
-        width - brWidth - 2,
-        height - brHeight - 2,
-        brWidth,
-        brHeight
-      );
-      ctx.fillStyle = "#10b981";
-      brText.forEach((text, i) =>
-        ctx.fillText(
-          text,
-          width - brWidth - 2 + padding,
-          height - brHeight - 2 + padding + i * (fontSize + 2)
-        )
-      );
-
       const patientID =
         metadata.patientID?.replace(/[^a-zA-Z0-9]/g, "_") || "Unknown";
       const seriesUID =
         metadata.seriesDescription?.replace(/[^a-zA-Z0-9]/g, "_") || "Unknown";
       const filename = `${patientID}_${seriesUID}_Image${currentIndex + 1}.png`;
-
       const link = document.createElement("a");
       link.href = exportCanvas.toDataURL("image/png");
       link.download = filename;
