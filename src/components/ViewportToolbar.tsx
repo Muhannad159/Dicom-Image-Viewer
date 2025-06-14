@@ -45,14 +45,14 @@ export function ViewportToolbar({
 }: ViewportToolbarProps) {
   return (
     <div className="bg-white border-b border-gray-200 px-3 py-2 flex items-center overflow-x-auto">
-      <div className="flex space-x-1">
+      <div className="flex space-x-5">
         {/* Navigation controls */}
         {selectedSeriesUID && seriesCount > 1 && (
-          <div className="flex items-center mr-2 border-r border-gray-200 pr-2">
+          <div className="flex items-center mr-2 border-r space-x-3 border-gray-200 pr-2">
             <Button
               variant="ghost"
               size="sm"
-              className="h-8 w-8 p-0"
+              className="h-10 w-12 p-0"
               onClick={() => onIndexChange(Math.max(0, currentIndex - 1))}
               disabled={currentIndex === 0}
             >
@@ -76,7 +76,7 @@ export function ViewportToolbar({
         )}
 
         {/* View tools */}
-        <div className="flex space-x-1">
+        <div className="flex space-x-4">
           <Button
             variant={activeTool === "Zoom" ? "default" : "ghost"}
             size="sm"
@@ -84,7 +84,7 @@ export function ViewportToolbar({
             onClick={() => onToolChange("Zoom")}
             title="Zoom"
           >
-            <ZoomIn className="h-4 w-4" />
+            <ZoomIn className="h-6 w-6" />
           </Button>
           <Button
             variant={activeTool === "Pan" ? "default" : "ghost"}

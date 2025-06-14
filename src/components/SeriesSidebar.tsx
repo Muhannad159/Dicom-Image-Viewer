@@ -16,7 +16,7 @@ export function SeriesSidebar({
 }: SeriesSidebarProps) {
   return (
     <div className="w-full md:w-60 lg:w-70 bg-white border-r border-gray-200 flex flex-col h-auto md:h-full">
-      <div className="p-3 border-b border-gray-200">
+      <div className="p-4 border-b border-gray-200">
         <h3 className="text-sm font-medium text-gray-700 uppercase tracking-wider">
           {uploadType === "single"
             ? "File"
