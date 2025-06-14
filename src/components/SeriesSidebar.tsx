@@ -15,7 +15,7 @@ export function SeriesSidebar({
   onSeriesSelect,
 }: SeriesSidebarProps) {
   return (
-    <div className="w-full md:w-56 lg:w-64 bg-white border-r border-gray-200 flex flex-col h-auto md:h-full">
+    <div className="w-full md:w-60 lg:w-70 bg-white border-r border-gray-200 flex flex-col h-auto md:h-full">
       <div className="p-3 border-b border-gray-200">
         <h3 className="text-sm font-medium text-gray-700 uppercase tracking-wider">
           {uploadType === "single"
@@ -45,7 +45,7 @@ export function SeriesSidebar({
                   <img
                     src={series.thumbnail}
                     alt="Series thumbnail"
-                    className="h-12 w-12 rounded-sm object-cover border border-gray-200"
+                    className="h-28 w-32 rounded-sm object-cover border border-gray-200"
                   />
                 </div>
               ) : (
@@ -54,20 +54,19 @@ export function SeriesSidebar({
                 </div>
               )}
 
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-gray-900 truncate">
-                  {uploadType === "single" || uploadType === "multiple"
-                    ? series.seriesInstanceUID
-                    : `Series ${series.seriesNumber}`}
-                </p>
+              <div className="min-w-0 flex-1 mt-2">
                 <div className="flex justify-between items-center">
-                  <span className="text-xs text-gray-500">
-                    {series.modality}
-                  </span>
-                  <span className="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full">
+                  <p className="text-sm font-medium text-gray-900 truncate">
+                    {uploadType === "single" || uploadType === "multiple"
+                      ? series.seriesInstanceUID
+                      : `Series ${series.seriesNumber}`}
+                  </p>
+                  <span className="text-sm bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full">
                     {series.imageIds.length}
                   </span>
                 </div>
+
+                <span className="text-sm text-gray-500">{series.modality}</span>
               </div>
             </div>
           </div>
