@@ -335,83 +335,89 @@ function FileUpload({ setFiles }: FileUploadProps) {
           </p>
         </div>
 
-        <div className="h-full flex items-center justify-center p-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* File Upload Card */}
           <div
-            className={`w-full max-w-sm bg-white border-2 ${
+            className={`border-2 rounded-xl p-6 transition-all ${
               isDraggingFiles
                 ? "border-emerald-500 bg-emerald-50"
-                : "border-gray-300"
-            } rounded-lg shadow-lg p-6 flex flex-col items-center gap-4 transition-all duration-200`}
+                : "border-gray-200 bg-white"
+            } shadow-sm hover:shadow-md`}
             onDragOver={handleFileDragOver}
             onDragEnter={handleFileDragEnter}
             onDragLeave={handleFileDragLeave}
             onDrop={handleFileDrop}
           >
-            <div className="flex items-center space-x-1">
-              <File size={30} className="text-emerald-500 mb-1" />
-
-              <h2 className="text-xl font-semibold text-gray-800">
-                Upload Files
-              </h2>
+            <div className="flex flex-col items-center text-center gap-4 h-full">
+              <div className="p-3 rounded-full bg-emerald-100 text-emerald-600">
+                <File className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <h2 className="text-lg font-semibold">DICOM Files</h2>
+                <p className="text-sm text-gray-500">
+                  Upload individual DICOM files (.dcm)
+                </p>
+              </div>
+              <Button
+                onClick={handleFileClick}
+                className="gap-2 mt-4"
+                variant="outline"
+              >
+                <Upload className="w-4 h-4" />
+                Select Files
+              </Button>
+              <p className="text-xs text-gray-400 mt-2">or drag files here</p>
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileChange}
+                className="hidden"
+                multiple
+                accept=".dcm"
+              />
             </div>
-            <p className="text-sm text-gray-600 text-center">
-              Drag and drop DICOM files (.dcm) here, or click to select files.
-            </p>
-            <Button
-              onClick={handleFileClick}
-              className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white"
-            >
-              <Upload size={20} />
-              Upload File(s)
-            </Button>
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={handleFileChange}
-              className="hidden"
-              multiple
-              accept=".dcm"
-            />
           </div>
 
           {/* Folder Upload Card */}
           <div
-            className={`w-full max-w-sm bg-white border-2 ${
+            className={`border-2 rounded-xl p-6 transition-all ${
               isDraggingFolder
-                ? "border-emerald-500 bg-emerald-50"
-                : "border-gray-300"
-            } rounded-lg shadow-lg p-6 flex flex-col items-center gap-4 transition-all duration-200`}
+                ? "border-blue-500 bg-blue-50"
+                : "border-gray-200 bg-white"
+            } shadow-sm hover:shadow-md`}
             onDragOver={handleFolderDragOver}
             onDragEnter={handleFolderDragEnter}
             onDragLeave={handleFolderDragLeave}
             onDrop={handleFolderDrop}
           >
-            <div className="flex items-center space-x-1">
-              <Folder size={30} className="text-emerald-500 mb-1" />
-              <h2 className="text-xl font-semibold text-gray-800">
-                Upload Folders
-              </h2>
+            <div className="flex flex-col items-center text-center gap-4 h-full">
+              <div className="p-3 rounded-full bg-blue-100 text-blue-600">
+                <Folder className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <h2 className="text-lg font-semibold">DICOM Folders</h2>
+                <p className="text-sm text-gray-500">
+                  Upload study or series folders containing DICOM files
+                </p>
+              </div>
+              <Button
+                onClick={handleFolderClick}
+                className="gap-2 mt-4"
+                variant="outline"
+              >
+                <Upload className="w-4 h-4" />
+                Select Folder
+              </Button>
+              <p className="text-xs text-gray-400 mt-2">or drag folder here</p>
+              <input
+                type="file"
+                ref={folderInputRef}
+                onChange={handleFolderChange}
+                className="hidden"
+                webkitdirectory=""
+                accept=".dcm"
+              />
             </div>
-            <p className="text-sm text-gray-600 text-center">
-              Drag and drop series or study folders here, or click to select a
-              folder.
-            </p>
-            <Button
-              onClick={handleFolderClick}
-              className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white"
-            >
-              <Upload size={20} />
-              Upload Folder
-            </Button>
-            <input
-              type="file"
-              ref={folderInputRef}
-              onChange={handleFolderChange}
-              className="hidden"
-              webkitdirectory=""
-              accept=".dcm"
-            />
           </div>
         </div>
       </div>
