@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import {
   RenderingEngine,
   Enums,
@@ -24,40 +24,17 @@ import {
   Enums as ToolsEnums,
 } from "@cornerstonejs/tools";
 import dicomParser from "dicom-parser";
-import {
-  ChevronLeft,
-  ChevronRight,
-  ZoomIn,
-  Hand,
-  Sliders,
-  Ruler,
-  Pen,
-  Maximize,
-  Minimize,
-  Square,
-  Circle,
-  RotateCw,
-  Download,
-} from "lucide-react";
 import { Button } from "./ui/button";
+import { useNavigate } from "react-router-dom";
+import { ViewportOverlay } from "./ViewportOverlay";
+import { ViewportToolbar } from "./ViewportToolbar";
+import { SeriesSidebar } from "./SeriesSidebar";
+import type { Series, ViewerProps } from "@/utilities/types";
 
-interface Series {
-  seriesInstanceUID: string;
-  seriesNumber: number;
-  modality: string;
-  imageIds: string[];
-  thumbnail?: string;
-}
-
-interface ViewerProps {
-  fileData?: {
-    files: File[];
-    uploadType: "single" | "multiple" | "series" | "study";
-    seriesGroups: Map<string, File[]>;
-  };
-}
 
 function Viewer({ fileData }: ViewerProps) {
+  const navigate = useNavigate();
+
   if (!fileData) {
     return (
       <div className="h-full flex flex-col items-center justify-center text-gray-500 p-4">
@@ -115,10 +92,7 @@ function Viewer({ fileData }: ViewerProps) {
       if (!isCoreInitialized.current) {
         try {
           await coreInit();
-          await dicomImageLoaderInit({
-            maxWebWorkers: navigator.hardwareConcurrency || 1,
-            codecsPath: "/codecs.js",
-          });
+          await dicomImageLoaderInit();
           await cornerstoneToolsInit();
           isCoreInitialized.current = true;
           setIsWadoInitialized(true);
@@ -750,15 +724,15 @@ function Viewer({ fileData }: ViewerProps) {
     [seriesList]
   );
 
+  const selectedSeries = seriesList.find(
+    (s) => s.seriesInstanceUID === selectedSeriesUID
+  );
+  const seriesCount = selectedSeries?.imageIds.length || 0;
+
   if (error) {
     return (
       <div className="h-full flex flex-col items-center justify-center text-red-500 p-4">
-        <h3 className="text-lg font-medium mb-2">Error</h3>
-        <p className="text-sm whitespace-pre-wrap">{error}</p>
-        <Button
-          className="mt-4"
-          onClick={() => console.warn("setFiles not implemented")}
-        >
+        <Button className="mt-4" onClick={() => navigate("/")}>
           Back to Upload
         </Button>
       </div>
@@ -767,280 +741,28 @@ function Viewer({ fileData }: ViewerProps) {
 
   return (
     <div className="h-full flex flex-col md:flex-row bg-gray-50">
-      {/* Sidebar */}
-      <div className="w-full md:w-56 lg:w-64 bg-white border-r border-gray-200 flex flex-col h-auto md:h-full">
-        <div className="p-3 border-b border-gray-200">
-          <h3 className="text-sm font-medium text-gray-700 uppercase tracking-wider">
-            {uploadType === "single"
-              ? "File"
-              : uploadType === "multiple"
-              ? "Files"
-              : uploadType === "series"
-              ? "Series"
-              : "Study"}
-          </h3>
-        </div>
+      <SeriesSidebar
+        uploadType={uploadType}
+        seriesList={seriesList}
+        selectedSeriesUID={selectedSeriesUID}
+        onSeriesSelect={handleSeriesSelect}
+      />
 
-        <div className="flex-1 overflow-y-auto">
-          {seriesList.map((series) => (
-            <div
-              key={series.seriesInstanceUID}
-              className={`p-3 border-b border-gray-100 cursor-pointer transition-colors ${
-                selectedSeriesUID === series.seriesInstanceUID
-                  ? "bg-blue-50 border-l-4 border-l-blue-500"
-                  : "hover:bg-gray-50"
-              }`}
-              onClick={() => handleSeriesSelect(series.seriesInstanceUID)}
-            >
-              <div className="flex items-start">
-                {series.thumbnail ? (
-                  <div className="mr-3 flex-shrink-0">
-                    <img
-                      src={series.thumbnail}
-                      alt="Series thumbnail"
-                      className="h-12 w-12 rounded-sm object-cover border border-gray-200"
-                    />
-                  </div>
-                ) : (
-                  <div className="mr-3 flex-shrink-0 h-12 w-12 bg-gray-100 rounded-sm border border-gray-200 flex items-center justify-center text-gray-400 text-xs">
-                    No Image
-                  </div>
-                )}
-
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-gray-900 truncate">
-                    {uploadType === "single" || uploadType === "multiple"
-                      ? series.seriesInstanceUID
-                      : `Series ${series.seriesNumber}`}
-                  </p>
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs text-gray-500">
-                      {series.modality}
-                    </span>
-                    <span className="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full">
-                      {series.imageIds.length}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Main content area */}
       <div className="flex-1 flex flex-col h-full overflow-hidden">
-        {/* Toolbar - Compact and organized */}
-        <div className="bg-white border-b border-gray-200 px-3 py-2 flex items-center overflow-x-auto">
-          <div className="flex space-x-1">
-            {/* Navigation controls */}
-            {selectedSeriesUID &&
-              seriesList.find((s) => s.seriesInstanceUID === selectedSeriesUID)
-                ?.imageIds.length > 1 && (
-                <div className="flex items-center mr-2 border-r border-gray-200 pr-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 w-8 p-0"
-                    onClick={() =>
-                      setCurrentIndex(Math.max(0, currentIndex - 1))
-                    }
-                    disabled={currentIndex === 0}
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                  </Button>
-                  <span className="mx-1 text-sm text-gray-600 whitespace-nowrap">
-                    {currentIndex + 1} /{" "}
-                    {seriesList.find(
-                      (s) => s.seriesInstanceUID === selectedSeriesUID
-                    )?.imageIds.length || 0}
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 w-8 p-0"
-                    onClick={() =>
-                      setCurrentIndex(
-                        Math.min(
-                          seriesList.find(
-                            (s) => s.seriesInstanceUID === selectedSeriesUID
-                          )?.imageIds.length - 1 || 0,
-                          currentIndex + 1
-                        )
-                      )
-                    }
-                    disabled={
-                      currentIndex ===
-                      (seriesList.find(
-                        (s) => s.seriesInstanceUID === selectedSeriesUID
-                      )?.imageIds.length || 0) -
-                        1
-                    }
-                  >
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
-                </div>
-              )}
+        <ViewportToolbar
+          activeTool={activeTool}
+          zoomLevel={zoomLevel}
+          currentIndex={currentIndex}
+          seriesCount={seriesCount}
+          isViewportReady={isViewportReady}
+          selectedSeriesUID={selectedSeriesUID}
+          onToolChange={activateTool}
+          onIndexChange={setCurrentIndex}
+          onFitToWindow={fitToWindow}
+          onActualSize={actualSize}
+          onExportImage={exportImage}
+        />
 
-            {/* Tool buttons - grouped by functionality */}
-            <div className="flex space-x-1">
-              {/* View tools */}
-              <Button
-                variant={activeTool === ZoomTool.toolName ? "default" : "ghost"}
-                size="sm"
-                className="h-8 w-8 p-0"
-                onClick={() => activateTool(ZoomTool.toolName)}
-                title="Zoom"
-              >
-                <ZoomIn className="h-4 w-4" />
-              </Button>
-              <Button
-                variant={activeTool === PanTool.toolName ? "default" : "ghost"}
-                size="sm"
-                className="h-8 w-8 p-0"
-                onClick={() => activateTool(PanTool.toolName)}
-                title="Pan"
-              >
-                <Hand className="h-4 w-4" />
-              </Button>
-              <Button
-                variant={
-                  activeTool === WindowLevelTool.toolName ? "default" : "ghost"
-                }
-                size="sm"
-                className="h-8 w-8 p-0"
-                onClick={() => activateTool(WindowLevelTool.toolName)}
-                title="Window Level/Width"
-              >
-                <Sliders className="h-4 w-4" />
-              </Button>
-            </div>
-
-            <div className="border-l border-gray-200 mx-1 h-6"></div>
-
-            {/* Measurement tools */}
-            <div className="flex space-x-1">
-              <Button
-                variant={
-                  activeTool === LengthTool.toolName ? "default" : "ghost"
-                }
-                size="sm"
-                className="h-8 w-8 p-0"
-                onClick={() => activateTool(LengthTool.toolName)}
-                title="Measure Length"
-              >
-                <Ruler className="h-4 w-4" />
-              </Button>
-              <Button
-                variant={
-                  activeTool === AngleTool.toolName ? "default" : "ghost"
-                }
-                size="sm"
-                className="h-8 w-8 p-0"
-                onClick={() => activateTool(AngleTool.toolName)}
-                title="Measure Angle"
-              >
-                <Ruler className="h-4 w-4 transform rotate-45" />
-              </Button>
-            </div>
-
-            <div className="border-l border-gray-200 mx-1 h-6"></div>
-
-            {/* Annotation tools */}
-            <div className="flex space-x-1">
-              <Button
-                variant={
-                  activeTool === ArrowAnnotateTool.toolName
-                    ? "default"
-                    : "ghost"
-                }
-                size="sm"
-                className="h-8 w-8 p-0"
-                onClick={() => activateTool(ArrowAnnotateTool.toolName)}
-                title="Arrow Annotate"
-              >
-                <Pen className="h-4 w-4" />
-              </Button>
-              <Button
-                variant={
-                  activeTool === CircleROITool.toolName ? "default" : "ghost"
-                }
-                size="sm"
-                className="h-8 w-8 p-0"
-                onClick={() => activateTool(CircleROITool.toolName)}
-                title="Circle Annotation"
-              >
-                <Circle className="h-4 w-4" />
-              </Button>
-              <Button
-                variant={
-                  activeTool === RectangleROITool.toolName ? "default" : "ghost"
-                }
-                size="sm"
-                className="h-8 w-8 p-0"
-                onClick={() => activateTool(RectangleROITool.toolName)}
-                title="Rectangle Annotation"
-              >
-                <Square className="h-4 w-4" />
-              </Button>
-            </div>
-
-            <div className="border-l border-gray-200 mx-1 h-6"></div>
-
-            {/* View controls */}
-            <div className="flex space-x-1">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 w-8 p-0"
-                onClick={fitToWindow}
-                title="Fit to Window"
-              >
-                <Maximize className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 w-8 p-0"
-                onClick={actualSize}
-                title="Actual Size"
-              >
-                <Minimize className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 w-8 p-0"
-                onClick={() => activateTool(PlanarRotateTool.toolName)}
-                title="Rotate"
-              >
-                <RotateCw className="h-4 w-4" />
-              </Button>
-            </div>
-
-            <div className="border-l border-gray-200 mx-1 h-6"></div>
-
-            {/* Export */}
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 w-8 p-0"
-              onClick={exportImage}
-              title="Export Image"
-              disabled={!isViewportReady || !selectedSeriesUID}
-            >
-              <Download className="h-4 w-4" />
-            </Button>
-          </div>
-
-          <div className="ml-auto flex items-center">
-            <span className="text-sm text-gray-600 mr-2">
-              Zoom: {zoomLevel}%
-            </span>
-          </div>
-        </div>
-
-        {/* Viewport area */}
         <div
           ref={containerRef}
           className="flex-1 bg-gray-100 relative overflow-hidden flex items-center justify-center"
@@ -1054,38 +776,11 @@ function Viewer({ fileData }: ViewerProps) {
             }}
           >
             {metadata && (
-              <>
-                <div className="absolute top-2 left-2 text-sky-500 text-xs bg-black bg-opacity-60 p-1.5 rounded">
-                  <div className="font-medium">
-                    Patient: {metadata.patientName || "N/A"}
-                  </div>
-                  <div>ID: {metadata.patientID || "N/A"}</div>
-                </div>
-                <div className="absolute top-2 right-2 text-sky-500 text-xs bg-black bg-opacity-60 p-1.5 rounded">
-                  <div className="font-medium">
-                    Date: {metadata.studyDate || "N/A"}
-                  </div>
-                  <div>Series: {metadata.seriesDescription || "N/A"}</div>
-                </div>
-                <div className="absolute bottom-2 left-2 text-sky-500 text-xs bg-black bg-opacity-60 p-1.5 rounded">
-                  <div className="font-medium">
-                    Modality: {metadata.modality || "N/A"}
-                  </div>
-                  <div>Location: {metadata.sliceLocation || "N/A"}</div>
-                </div>
-                <div className="absolute bottom-2 right-2 text-sky-500 text-xs bg-black bg-opacity-60 p-1.5 rounded">
-                  <div className="font-medium">
-                    Slice: {metadata.instanceNumber || "N/A"} /{" "}
-                    {seriesList.find(
-                      (s) => s.seriesInstanceUID === selectedSeriesUID
-                    )?.imageIds.length || 0}
-                  </div>
-                  <div>
-                    WC/WW: {metadata.windowCenter || "N/A"}/
-                    {metadata.windowWidth || "N/A"}
-                  </div>
-                </div>
-              </>
+              <ViewportOverlay
+                metadata={metadata}
+                currentIndex={currentIndex}
+                seriesCount={seriesCount}
+              />
             )}
           </div>
         </div>
