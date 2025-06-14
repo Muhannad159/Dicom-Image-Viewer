@@ -31,7 +31,6 @@ import { ViewportToolbar } from "./ViewportToolbar";
 import { SeriesSidebar } from "./SeriesSidebar";
 import type { Series, ViewerProps } from "@/utilities/types";
 
-
 function Viewer({ fileData }: ViewerProps) {
   const navigate = useNavigate();
 
@@ -233,6 +232,8 @@ function Viewer({ fileData }: ViewerProps) {
               (uploadType === "study" && series.imageIds.length === 1)
             ) {
               await generateThumbnail(imageId, series);
+              setSelectedSeriesUID(seriesInstanceUID[0]);
+              setCurrentIndex(0);
             }
           } catch (err) {
             errors.push(
