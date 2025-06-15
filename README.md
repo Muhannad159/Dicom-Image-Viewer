@@ -1,54 +1,56 @@
-# React + TypeScript + Vite
+# DICOM Viewer
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A web-based application for visualizing medical imaging data in DICOM format (.dcm). Upload individual files or folders to view single images, multiple images, series, or studies with an intuitive interface.
 
-Currently, two official plugins are available:
+## Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- **File Uploads**:
 
-## Expanding the ESLint configuration
+  - Upload single or multiple `.dcm` files to view individual images or collections.
+  - Supports `single` (one file) and `multiple` (several files) upload types.
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+- **Folder Uploads**:
 
-```js
-export default tseslint.config({
-  extends: [
-    // Remove ...tseslint.configs.recommended and replace with this
-    ...tseslint.configs.recommendedTypeChecked,
-    // Alternatively, use this for stricter rules
-    ...tseslint.configs.strictTypeChecked,
-    // Optionally, add this for stylistic rules
-    ...tseslint.configs.stylisticTypeChecked,
-  ],
-  languageOptions: {
-    // other options...
-    parserOptions: {
-      project: ['./tsconfig.node.json', './tsconfig.app.json'],
-      tsconfigRootDir: import.meta.dirname,
-    },
-  },
-})
+  - Upload series folders (containing `.dcm` files) or study folders (multiple series folders).
+  - Automatically detects `series` (single folder) or `study` (nested folders) upload types.
+
+- **Drag-and-Drop Support**:
+
+  - Drag and drop `.dcm` files onto the File Upload Card.
+  - Drag and drop series or study folders onto the Folder Upload Card.
+  - Visual feedback with card highlights during drag (emerald for files, blue for folders).
+
+- **User-Friendly Interface**:
+
+  - Clean, centered layout with a header describing the DICOM Viewer.
+  - Two responsive cards (File and Folder) in a grid layout, adapting to mobile and desktop screens.
+  - Icons for files and folders in circular backgrounds for clear visual cues.
+  - Outline buttons with upload or loading indicators for intuitive interaction.
+
+- **Loading Feedback**:
+
+  - Overlay loader appears on cards during file processing, ensuring a minimum 1-second display for visibility.
+  - "Processing..." text shown during uploads for user feedback.
+
+- **Error Handling**:
+  - Displays clear error messages for invalid files (non-`.dcm`) or empty folders.
+  - Example: "Invalid file type detected: file.txt" or "No valid DICOM files found in dropped folder."
+
+## Getting Started
+
+1. **Clone the Repository**:
+   ```bash
+   git clone <https://github.com/Muhannad159/Dicom-Image-Viewer.git>
+   cd dicom-viewer
+   ```
+2. **Install Dependencies**:
+
+```bash
+npm install
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+3- **Run the Viewer**:
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default tseslint.config({
-  plugins: {
-    // Add the react-x and react-dom plugins
-    'react-x': reactX,
-    'react-dom': reactDom,
-  },
-  rules: {
-    // other rules...
-    // Enable its recommended typescript rules
-    ...reactX.configs['recommended-typescript'].rules,
-    ...reactDom.configs.recommended.rules,
-  },
-})
+```bash
+npm run dev
 ```
