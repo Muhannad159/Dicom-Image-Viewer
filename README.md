@@ -41,7 +41,7 @@ A web-based application for visualizing medical imaging data in DICOM format (.d
 1. **Clone the Repository**:
    ```bash
    git clone <https://github.com/Muhannad159/Dicom-Image-Viewer.git>
-   cd dicom-viewer
+   cd dicom-image-viewer
    ```
 2. **Install Dependencies**:
 
