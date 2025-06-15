@@ -172,11 +172,6 @@ function FileUpload({ setFiles }: FileUploadProps) {
       event.preventDefault();
       event.stopPropagation();
       setIsDraggingFiles(false);
-      console.log(
-        "Files dropped (file card):",
-        Array.from(event.dataTransfer.files).map((f) => f.name)
-      ); // Debug log
-
       const files = event.dataTransfer.files;
       if (files.length > 0) {
         handleFileUpload(Array.from(files));
@@ -191,7 +186,6 @@ function FileUpload({ setFiles }: FileUploadProps) {
       event.preventDefault();
       event.stopPropagation();
       setIsDraggingFolder(true);
-      console.log("Folder drag over"); // Debug log
     },
     []
   );
@@ -201,7 +195,6 @@ function FileUpload({ setFiles }: FileUploadProps) {
       event.preventDefault();
       event.stopPropagation();
       setIsDraggingFolder(true);
-      console.log("Folder drag enter"); // Debug log
     },
     []
   );

@@ -32,19 +32,17 @@ import { SeriesSidebar } from "./SeriesSidebar";
 import type { Series, ViewerProps } from "@/utilities/types";
 
 function Viewer({ fileData }: ViewerProps) {
-  const navigate = useNavigate();
-
   if (!fileData) {
     return (
-      <div className="h-full flex flex-col items-center justify-center text-gray-500 p-4">
-        <h3 className="text-lg font-medium mb-2">No Files Uploaded</h3>
-        <p className="text-sm">
-          Please upload DICOM files or a folder to view.
-        </p>
+      <div className="h-full flex flex-col items-center justify-center text-red-500 p-4">
+        <Button className="mt-4" onClick={() => navigate("/")}>
+          Back to Upload
+        </Button>
       </div>
     );
   }
 
+  const navigate = useNavigate();
   const { files, uploadType, seriesGroups } = fileData;
   const viewportRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -72,7 +70,6 @@ function Viewer({ fileData }: ViewerProps) {
   const isCoreInitialized = useRef<boolean>(false);
   const metadataMapRef = useRef<Map<string, any>>(new Map());
   const VIEWPORT_SCALE = 0.9;
-
   const TOOLS = [
     ZoomTool,
     WindowLevelTool,
@@ -96,7 +93,6 @@ function Viewer({ fileData }: ViewerProps) {
           await cornerstoneToolsInit();
           isCoreInitialized.current = true;
           setIsWadoInitialized(true);
-          console.log("Cornerstone initialized");
         } catch (err) {
           setError(
             `Initialization failed: ${
@@ -116,10 +112,8 @@ function Viewer({ fileData }: ViewerProps) {
 
   // Initial loading effect
   useEffect(() => {
-    console.log("Starting initial loading");
     const timer = setTimeout(() => {
       setIsInitialLoading(false);
-      console.log("Initial loading complete");
     }, 1000);
     return () => clearTimeout(timer);
   }, []);
@@ -144,7 +138,6 @@ function Viewer({ fileData }: ViewerProps) {
         max = Math.max(max, pixelData[i]);
       }
       const range = max - min || 1;
-
       const canvas = document.createElement("canvas");
       canvas.width = 100;
       canvas.height = 100;
@@ -274,11 +267,6 @@ function Viewer({ fileData }: ViewerProps) {
         setCurrentIndex(0);
         setTimeout(() => {
           window.dispatchEvent(new Event("resize"));
-          console.log(
-            "Initial series selected:",
-            sortedSeries[0].seriesInstanceUID,
-            { isViewportReady }
-          );
         }, 100);
       }
       setError(
@@ -309,18 +297,14 @@ function Viewer({ fileData }: ViewerProps) {
       setIsViewportReady(false);
       return;
     }
-
     const element = viewportRef.current;
     const container = containerRef.current;
     let renderingEngine = renderingEngineRef.current;
-
     const setupViewport = async () => {
       if (!renderingEngine) {
         renderingEngine = new RenderingEngine(renderingEngineId);
         renderingEngineRef.current = renderingEngine;
-        console.log("RenderingEngine created");
       }
-
       if (!isViewportEnabled.current) {
         renderingEngine.enableElement({
           viewportId,
@@ -328,8 +312,6 @@ function Viewer({ fileData }: ViewerProps) {
           type: Enums.ViewportType.STACK,
         });
         isViewportEnabled.current = true;
-        console.log("Viewport enabled");
-
         let toolGroup = ToolGroupManager.getToolGroup(toolGroupId);
         if (!toolGroup) {
           toolGroup = ToolGroupManager.createToolGroup(toolGroupId)!;
@@ -342,7 +324,6 @@ function Viewer({ fileData }: ViewerProps) {
           console.log("ToolGroup created");
         }
       }
-      // Set ready earlier to trigger initial render
       setIsViewportReady(true);
     };
 
@@ -359,7 +340,6 @@ function Viewer({ fileData }: ViewerProps) {
         const { rows, columns } = imageMetadata.imagePixelModule;
         const aspectRatio = columns / rows;
         const containerAspect = container.clientWidth / container.clientHeight;
-
         let width = container.clientWidth * VIEWPORT_SCALE;
         let height = width / aspectRatio;
         if (aspectRatio < containerAspect) {
@@ -383,21 +363,16 @@ function Viewer({ fileData }: ViewerProps) {
             renderingEngine.resize();
             viewport.render();
             setZoomLevel(Math.round(viewport.getZoom() * 100));
-            console.log("Viewport resized:", { width, height });
           }
         }
       } else {
         setIsViewportReady(false);
-        console.log("Viewport not ready: missing metadata or series");
       }
     };
-
     setupViewport();
     updateSize();
-
     const observer = new ResizeObserver(() => updateSize());
     observer.observe(container);
-
     return () => {
       observer.disconnect();
       ToolGroupManager.destroyToolGroup(toolGroupId);
@@ -423,12 +398,6 @@ function Viewer({ fileData }: ViewerProps) {
       !selectedSeriesUID ||
       !isViewportReady
     ) {
-      console.log("Skipping stack update:", {
-        hasRenderingEngine: !!renderingEngineRef.current,
-        hasViewport: !!viewportRef.current,
-        selectedSeriesUID,
-        isViewportReady,
-      });
       return;
     }
 
@@ -469,20 +438,6 @@ function Viewer({ fileData }: ViewerProps) {
             }
           }
         }
-
-        console.log(`Rendering image: ${imageId}`, {
-          transferSyntax: metadataMapRef.current.get(imageId)?.transferSyntax,
-          photometricInterpretation:
-            metadataMapRef.current.get(imageId)?.imagePixelModule
-              ?.photometricInterpretation,
-          bitsAllocated:
-            metadataMapRef.current.get(imageId)?.imagePixelModule
-              ?.bitsAllocated,
-          bitsStored:
-            metadataMapRef.current.get(imageId)?.imagePixelModule?.bitsStored,
-          pixelDataLength: pixelData?.length,
-        });
-
         const imageMetadata = {
           patientID: metaData.get("patientID", imageId) || "Unknown",
           patientName: metaData.get("patientName", imageId) || "Unknown",
@@ -499,7 +454,6 @@ function Viewer({ fileData }: ViewerProps) {
         setMetadata(imageMetadata);
 
         await viewport.setStack(selectedSeries.imageIds, currentIndex);
-
         const canvas = viewport.getCanvas();
         canvas.width = viewportRef.current.clientWidth;
         canvas.height = viewportRef.current.clientHeight;
@@ -523,7 +477,6 @@ function Viewer({ fileData }: ViewerProps) {
         viewport.reset();
         setZoomLevel(Math.round(viewport.getZoom() * 100));
         viewport.render();
-        console.log(`Stack updated: ${imageId}`);
       } catch (err) {
         console.error(`Failed to update stack at index ${currentIndex}:`, err);
         setError(
@@ -533,7 +486,6 @@ function Viewer({ fileData }: ViewerProps) {
         );
       }
     };
-
     updateStack();
   }, [currentIndex, selectedSeriesUID, seriesList, isViewportReady]);
 
@@ -544,7 +496,6 @@ function Viewer({ fileData }: ViewerProps) {
         viewportId
       ) as cornerstone.Types.IStackViewport;
       if (!viewport) {
-        console.log("No viewport available for tool activation");
         return;
       }
 
@@ -552,7 +503,6 @@ function Viewer({ fileData }: ViewerProps) {
         (s) => s.seriesInstanceUID === selectedSeriesUID
       );
       if (!selectedSeries || !selectedSeries.imageIds[currentIndex]) {
-        console.log("No valid series or image for tool activation");
         return;
       }
 
@@ -562,11 +512,8 @@ function Viewer({ fileData }: ViewerProps) {
       toolGroupRef.current.setToolActive(activeTool, {
         bindings: [{ mouseButton: ToolsEnums.MouseBindings.Primary }],
       });
-
-      // Restore stack to prevent image disappearance
       viewport.setStack(selectedSeries.imageIds, currentIndex).then(() => {
         viewport.render();
-        console.log(`Tool activated: ${activeTool}, stack restored`);
       });
       const handleInteraction = () => {
         setZoomLevel(Math.round(viewport.getZoom() * 100));
@@ -670,7 +617,6 @@ function Viewer({ fileData }: ViewerProps) {
       const now = Date.now();
       if (now - lastScrollTime.current < 400) return;
       lastScrollTime.current = now;
-
       const direction = Math.sign(event.deltaY);
       const selectedSeries = seriesList.find(
         (s) => s.seriesInstanceUID === selectedSeriesUID
@@ -682,7 +628,6 @@ function Viewer({ fileData }: ViewerProps) {
         );
         if (nextIndex !== currentIndex) {
           setCurrentIndex(nextIndex);
-          console.log(`Scrolled to index: ${nextIndex}`);
         }
       }
     },
@@ -696,7 +641,6 @@ function Viewer({ fileData }: ViewerProps) {
     return () => element?.removeEventListener("wheel", handleScroll);
   }, [handleScroll]);
 
-  // Add new useEffect after active tool useEffect
   useEffect(() => {
     if (
       !isViewportReady ||
@@ -704,12 +648,6 @@ function Viewer({ fileData }: ViewerProps) {
       currentIndex !== 0 ||
       !toolGroupRef.current
     ) {
-      console.log("Skipping ZoomTool trigger:", {
-        isViewportReady,
-        selectedSeriesUID,
-        currentIndex,
-        hasToolGroup: !!toolGroupRef.current,
-      });
       return;
     }
 
@@ -764,7 +702,6 @@ function Viewer({ fileData }: ViewerProps) {
         setCurrentIndex(0);
         setTimeout(() => {
           window.dispatchEvent(new Event("resize"));
-          console.log("Series selected:", seriesUID, { isViewportReady });
         }, 100);
       } else {
         setError("Invalid or empty series selected.");
@@ -787,7 +724,6 @@ function Viewer({ fileData }: ViewerProps) {
       </div>
     );
   }
-
   return (
     <div className="h-full flex flex-col md:flex-row bg-gray-50">
       {/* Initial Loading Overlay */}
