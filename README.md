@@ -18,23 +18,17 @@ A web-based application for visualizing medical imaging data in DICOM format (.d
 
   - Drag and drop `.dcm` files onto the File Upload Card.
   - Drag and drop series or study folders onto the Folder Upload Card.
-  - Visual feedback with card highlights during drag (emerald for files, blue for folders).
 
 - **User-Friendly Interface**:
 
   - Clean, centered layout with a header describing the DICOM Viewer.
-  - Two responsive cards (File and Folder) in a grid layout, adapting to mobile and desktop screens.
-  - Icons for files and folders in circular backgrounds for clear visual cues.
-  - Outline buttons with upload or loading indicators for intuitive interaction.
 
-- **Loading Feedback**:
-
-  - Overlay loader appears on cards during file processing, ensuring a minimum 1-second display for visibility.
-  - "Processing..." text shown during uploads for user feedback.
-
-- **Error Handling**:
-  - Displays clear error messages for invalid files (non-`.dcm`) or empty folders.
-  - Example: "Invalid file type detected: file.txt" or "No valid DICOM files found in dropped folder."
+- **Viewer Tools**:
+  - **Zoom and Pan**: Adjust image scale and navigate within images for detailed inspection.
+  - **Window/Level Adjustment**: Modify contrast and brightness to enhance image visibility.
+  - **Annotations**: Add measurements, markers, or notes to highlight areas of interest.
+  - **Image Navigation**: Scroll through multi-image series or studies to review all slices.
+  - **Export**: Export your viewport as PNG file.
 
 ## Getting Started
 
