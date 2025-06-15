@@ -100,15 +100,6 @@ function FileUpload({ setFiles }: FileUploadProps) {
           : "series";
 
       setFiles({ files: filteredFiles, uploadType, seriesGroups });
-      console.log(
-        `Upload type: ${uploadType}, Files:`,
-        filteredFiles.map((f) => f.name),
-        `SeriesGroups:`,
-        Array.from(seriesGroups.entries()).map(([key, files]) => ({
-          key,
-          files: files.map((f) => f.name),
-        }))
-      );
 
       // Reset input
       if (folderInputRef.current) folderInputRef.current.value = "";
@@ -119,12 +110,6 @@ function FileUpload({ setFiles }: FileUploadProps) {
   // File input change handler
   const handleFileChange = useCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
-      console.log(
-        "File input changed, files:",
-        event.target.files
-          ? Array.from(event.target.files).map((f) => f.name)
-          : "none"
-      ); // Debug log
       if (event.target.files && event.target.files.length > 0) {
         handleFileUpload(Array.from(event.target.files));
       }
@@ -135,12 +120,6 @@ function FileUpload({ setFiles }: FileUploadProps) {
   // Folder input change handler
   const handleFolderChange = useCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
-      console.log(
-        "Folder input changed, files:",
-        event.target.files
-          ? Array.from(event.target.files).map((f) => f.name)
-          : "none"
-      ); // Debug log
       if (event.target.files && event.target.files.length > 0) {
         handleFolderUpload(Array.from(event.target.files));
       }
@@ -232,7 +211,6 @@ function FileUpload({ setFiles }: FileUploadProps) {
       event.preventDefault();
       event.stopPropagation();
       setIsDraggingFolder(false);
-      console.log("Folder drag leave"); // Debug log
     },
     []
   );
@@ -242,12 +220,10 @@ function FileUpload({ setFiles }: FileUploadProps) {
       event.preventDefault();
       event.stopPropagation();
       setIsDraggingFolder(false);
-      console.log("Folder drop event triggered"); // Debug log
 
       const items = event.dataTransfer.items;
       const files: File[] = [];
 
-      // Helper to process directory entries recursively
       const readEntries = async (
         entry: FileSystemDirectoryEntry,
         path: string = ""
@@ -262,7 +238,7 @@ function FileUpload({ setFiles }: FileUploadProps) {
                 const file = await new Promise<File>((res) =>
                   fileEntry.file((f) => res(f))
                 );
-                // Set webkitRelativePath to mimic input[webkitdirectory]
+
                 Object.defineProperty(file, "webkitRelativePath", {
                   value: `${path}${entry.name}/${file.name}`,
                   writable: true,
@@ -287,12 +263,6 @@ function FileUpload({ setFiles }: FileUploadProps) {
         if (item.webkitGetAsEntry) {
           const entry = item.webkitGetAsEntry();
           if (entry) {
-            console.log(
-              "Processing entry:",
-              entry.name,
-              "isDirectory:",
-              entry.isDirectory
-            ); // Debug log
             if (entry.isFile) {
               const fileEntry = entry as FileSystemFileEntry;
               const file = await new Promise<File>((resolve) =>
@@ -307,14 +277,6 @@ function FileUpload({ setFiles }: FileUploadProps) {
           }
         }
       }
-
-      console.log(
-        "Collected files for folder drop:",
-        files.map((f) => ({
-          name: f.name,
-          webkitRelativePath: (f as any).webkitRelativePath || "none",
-        }))
-      ); // Debug log
 
       if (files.length > 0) {
         handleFolderUpload(files);

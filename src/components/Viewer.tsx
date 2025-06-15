@@ -61,6 +61,7 @@ function Viewer({ fileData }: ViewerProps) {
   const [zoomLevel, setZoomLevel] = useState<number>(100);
   const [isWadoInitialized, setIsWadoInitialized] = useState<boolean>(false);
   const [isViewportReady, setIsViewportReady] = useState<boolean>(false);
+  const [isInitialLoading, setIsInitialLoading] = useState<boolean>(true);
   const renderingEngineRef = useRef<RenderingEngine | null>(null);
   const toolGroupRef = useRef<any>(null);
   const lastScrollTime = useRef<number>(0);
@@ -111,6 +112,16 @@ function Viewer({ fileData }: ViewerProps) {
   // Register tools
   useEffect(() => {
     TOOLS.forEach(addTool);
+  }, []);
+
+  // Initial loading effect
+  useEffect(() => {
+    console.log("Starting initial loading");
+    const timer = setTimeout(() => {
+      setIsInitialLoading(false);
+      console.log("Initial loading complete");
+    }, 1000);
+    return () => clearTimeout(timer);
   }, []);
 
   // Generate thumbnail
@@ -657,7 +668,7 @@ function Viewer({ fileData }: ViewerProps) {
     (event: WheelEvent) => {
       event.preventDefault();
       const now = Date.now();
-      if (now - lastScrollTime.current < 300) return;
+      if (now - lastScrollTime.current < 400) return;
       lastScrollTime.current = now;
 
       const direction = Math.sign(event.deltaY);
@@ -684,6 +695,43 @@ function Viewer({ fileData }: ViewerProps) {
       element.addEventListener("wheel", handleScroll, { passive: false });
     return () => element?.removeEventListener("wheel", handleScroll);
   }, [handleScroll]);
+
+  // Add new useEffect after active tool useEffect
+  useEffect(() => {
+    if (
+      !isViewportReady ||
+      !selectedSeriesUID ||
+      currentIndex !== 0 ||
+      !toolGroupRef.current
+    ) {
+      console.log("Skipping ZoomTool trigger:", {
+        isViewportReady,
+        selectedSeriesUID,
+        currentIndex,
+        hasToolGroup: !!toolGroupRef.current,
+      });
+      return;
+    }
+
+    const selectedSeries = seriesList.find(
+      (s) => s.seriesInstanceUID === selectedSeriesUID
+    );
+    if (!selectedSeries || selectedSeries.imageIds.length === 0) {
+      return;
+    }
+    activateTool(ZoomTool.toolName);
+    const revertTimer = setTimeout(() => {
+      activateTool(WindowLevelTool.toolName);
+    }, 10);
+
+    return () => clearTimeout(revertTimer);
+  }, [
+    isViewportReady,
+    selectedSeriesUID,
+    seriesList,
+    currentIndex,
+    activateTool,
+  ]);
 
   const handleKeyDown = useCallback(
     (event: KeyboardEvent) => {
@@ -742,6 +790,32 @@ function Viewer({ fileData }: ViewerProps) {
 
   return (
     <div className="h-full flex flex-col md:flex-row bg-gray-50">
+      {/* Initial Loading Overlay */}
+      {isInitialLoading && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="flex flex-col items-center space-y-4">
+            <div className="w-64 h-2 bg-gray-200 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-emerald-500"
+                style={{
+                  width: "0%",
+                  animation: "progress 1s linear forwards",
+                }}
+              ></div>
+            </div>
+            <p className="text-white text-lg">Initializing Viewer...</p>
+          </div>
+        </div>
+      )}
+      <style>
+        {`
+          @keyframes progress {
+            0% { width: 0%; }
+            100% { width: 100%; }
+          }
+        `}
+      </style>
+
       <SeriesSidebar
         uploadType={uploadType}
         seriesList={seriesList}
